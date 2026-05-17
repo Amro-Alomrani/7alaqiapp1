@@ -1,0 +1,147 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap");
+
+@import "tailwindcss";
+@config "../tailwind.config.ts";
+
+/* Barber Go — luxurious dark theme: deep black + royal purple + gold accents */
+:root {
+  --background: 260 25% 5%;
+  --foreground: 45 40% 96%;
+  --muted: 260 20% 13%;
+  --muted-foreground: 260 10% 60%;
+  --popover: 260 25% 8%;
+  --popover-foreground: 45 40% 96%;
+  --border: 260 20% 18%;
+  --input: 260 20% 13%;
+  --card: 260 25% 8%;
+  --card-foreground: 45 40% 96%;
+  --primary: 42 85% 58%;
+  --primary-foreground: 260 30% 8%;
+  --secondary: 270 30% 14%;
+  --secondary-foreground: 45 35% 92%;
+  --accent: 270 70% 60%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 72% 55%;
+  --destructive-foreground: 0 0% 98%;
+  --ring: 42 85% 58%;
+  --radius: 0.9rem;
+  --chart-1: 42 85% 58%;
+  --chart-2: 270 70% 60%;
+  --chart-3: 30 80% 55%;
+  --chart-4: 290 65% 65%;
+  --chart-5: 340 75% 55%;
+  --sidebar-background: 260 25% 5%;
+  --sidebar-foreground: 45 40% 96%;
+  --sidebar-primary: 42 85% 58%;
+  --sidebar-primary-foreground: 260 30% 8%;
+  --sidebar-accent: 270 30% 14%;
+  --sidebar-accent-foreground: 45 35% 92%;
+  --sidebar-border: 260 20% 18%;
+  --sidebar-ring: 42 85% 58%;
+  --font-sans: 'Inter', 'Helvetica Neue', sans-serif;
+  --font-mono: 'Courier New', monospace;
+  --shadow-x: 0px;
+  --shadow-y: 2px;
+  --shadow-blur: 12px;
+  --shadow-spread: 0px;
+  --shadow-opacity: 0.4;
+  --shadow-color: #000000;
+  --shadow-2xs: var(--shadow-x) var(--shadow-y) color-mix(in srgb, var(--shadow-color) calc(var(--shadow-opacity) * 100%), transparent);
+  --shadow-xs: var(--shadow-x) var(--shadow-y) var(--shadow-blur) var(--shadow-spread) color-mix(in srgb, var(--shadow-color) calc(var(--shadow-opacity) * 100%), transparent);
+  --shadow-sm: var(--shadow-x) var(--shadow-y) calc(var(--shadow-blur) * 1.5) var(--shadow-spread) color-mix(in srgb, var(--shadow-color) calc(var(--shadow-opacity) * 100%), transparent);
+  --shadow-md: calc(var(--shadow-x) * 2) calc(var(--shadow-y) * 2) calc(var(--shadow-blur) * 3) calc(var(--shadow-spread) - 1px) color-mix(in srgb, var(--shadow-color) calc(var(--shadow-opacity) * 100%), transparent);
+  --shadow-lg: calc(var(--shadow-x) * 4) calc(var(--shadow-y) * 4) calc(var(--shadow-blur) * 5) calc(var(--shadow-spread) - 3px) color-mix(in srgb, var(--shadow-color) calc(var(--shadow-opacity) * 100%), transparent);
+  --shadow-xl: calc(var(--shadow-x) * 6) calc(var(--shadow-y) * 6) calc(var(--shadow-blur) * 7) calc(var(--shadow-spread) - 5px) color-mix(in srgb, var(--shadow-color) calc(var(--shadow-opacity) * 100%), transparent);
+  --shadow-2xl: calc(var(--shadow-x) * 8) calc(var(--shadow-y) * 8) calc(max(0px, var(--shadow-blur) * 9 - 8px)) calc(var(--shadow-spread) - 12px) color-mix(in srgb, var(--shadow-color) calc(var(--shadow-opacity) * 250%), transparent);
+  --shadow: var(--shadow-md);
+}
+
+:root.light {
+  --background: 220 20% 97%;
+  --foreground: 222 25% 10%;
+  --muted: 220 15% 92%;
+  --muted-foreground: 220 10% 45%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 25% 10%;
+  --border: 220 15% 85%;
+  --input: 220 15% 90%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 25% 10%;
+  --secondary: 220 15% 90%;
+  --secondary-foreground: 222 22% 20%;
+  --primary: 38 88% 46%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 38 88% 46%;
+  --accent-foreground: 0 0% 100%;
+  --sidebar-background: 220 20% 97%;
+  --sidebar-foreground: 222 25% 10%;
+  --sidebar-border: 220 15% 85%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::-webkit-scrollbar { display: none; }
+* { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Barber Go luxury utilities */
+.bg-gold-gradient {
+  background: linear-gradient(135deg, hsl(42 85% 58%) 0%, hsl(38 75% 45%) 50%, hsl(42 85% 58%) 100%);
+}
+.bg-royal-gradient {
+  background: linear-gradient(135deg, hsl(270 70% 40%) 0%, hsl(280 65% 30%) 100%);
+}
+.text-gold-gradient {
+  background: linear-gradient(135deg, hsl(42 95% 65%) 0%, hsl(38 85% 50%) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.shadow-gold {
+  box-shadow: 0 10px 30px -10px hsl(42 85% 58% / 0.35);
+}
+.shadow-royal {
+  box-shadow: 0 10px 30px -10px hsl(270 70% 60% / 0.35);
+}
+.glass-card {
+  background: linear-gradient(135deg, hsl(260 25% 10% / 0.85), hsl(260 25% 6% / 0.85));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid hsl(270 30% 20% / 0.6);
+}
+
+/* ── Capacitor / Android WebView fixes ── */
+html, body {
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+input, textarea { user-select: text; -webkit-user-select: text; }
+
+/* Leaflet in WebView */
+.leaflet-container {
+  width: 100% !important;
+  height: 100% !important;
+  background: hsl(var(--background));
+  -webkit-tap-highlight-color: transparent;
+}
+.leaflet-tile-pane { will-change: transform; }
+.leaflet-control-zoom {
+  display: none !important;
+}
+
+/* Safe area insets for Android notch / nav-bar */
+.pt-safe { padding-top: env(safe-area-inset-top, 12px); }
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }

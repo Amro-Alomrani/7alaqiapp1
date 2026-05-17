@@ -1,0 +1,77 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Build artefacts
+app-debug.apk
+build.log
+capsync.log
+gradle-build.log
+tsc.log
+apk-download/
+
+# iOS / CocoaPods
+ios/App/Pods/
+ios/App/Podfile.lock
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/
+ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
+ios/App/build/
+ios/DerivedData/
+*.xcuserstate
+
+# Android local
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/
+android/app/release/
+android/key.properties
+android/keystore.properties
+android/*.keystore
+android/*.jks
+android/app/*.keystore
+android/app/*.jks
+android/app/src/main/assets/public/
+
+# Capacitor
+.capacitor/
+
+# Firebase hosting cache
+.firebase/
+
+# Claude local settings
+.claude/
+
+# Apple signing (never commit)
+*.p12
+*.p8
+*.mobileprovision
+*.cer
+*.certSigningRequest

@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="65%">
+      <stop offset="0%" stop-color="#1a2540"/>
+      <stop offset="55%" stop-color="#0a0f1f"/>
+      <stop offset="100%" stop-color="#000"/>
+    </radialGradient>
+    <linearGradient id="blade" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e6f3ff"/>
+      <stop offset="100%" stop-color="#7aa9d6"/>
+    </linearGradient>
+    <linearGradient id="goBlue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7ee0ff"/>
+      <stop offset="100%" stop-color="#1d6df0"/>
+    </linearGradient>
+    <linearGradient id="barberSilver" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f4f7fb"/>
+      <stop offset="100%" stop-color="#9aa7bd"/>
+    </linearGradient>
+    <linearGradient id="poleStripe" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="33%" stop-color="#ff2d2d"/>
+      <stop offset="66%" stop-color="#1d6df0"/>
+      <stop offset="100%" stop-color="#ffffff"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#41a6ff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#41a6ff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+  </defs>
+
+  <!-- background disk -->
+  <circle cx="256" cy="256" r="252" fill="url(#bg)" stroke="#1d6df0" stroke-width="3" stroke-opacity="0.6"/>
+  <circle cx="256" cy="256" r="240" fill="url(#glow)" opacity="0.7"/>
+
+  <!-- barber pole left -->
+  <g transform="translate(60 96)">
+    <rect x="0" y="0" width="38" height="170" rx="14" fill="url(#poleStripe)" stroke="#0b1224" stroke-width="3"/>
+    <circle cx="19" cy="-8" r="14" fill="#cfd8e6" stroke="#0b1224" stroke-width="3"/>
+    <circle cx="19" cy="178" r="14" fill="#cfd8e6" stroke="#0b1224" stroke-width="3"/>
+  </g>
+
+  <!-- clipper right -->
+  <g transform="translate(360 92) rotate(12)">
+    <rect x="0" y="0" width="86" height="150" rx="18" fill="#1a2c4a" stroke="#41a6ff" stroke-width="3"/>
+    <rect x="6" y="6" width="74" height="36" rx="8" fill="#0b1224"/>
+    <circle cx="43" cy="80" r="12" fill="#41a6ff"/>
+    <rect x="0" y="148" width="86" height="22" rx="6" fill="url(#blade)" stroke="#0b1224" stroke-width="3"/>
+  </g>
+
+  <!-- scissors crossing top -->
+  <g transform="translate(256 110)" stroke="#0b1224" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <g transform="rotate(-25)">
+      <circle cx="-46" cy="0" r="22" fill="#41a6ff"/>
+      <line x1="-30" y1="0" x2="80" y2="0" stroke="url(#blade)" stroke-width="14"/>
+    </g>
+    <g transform="rotate(25)">
+      <circle cx="-46" cy="0" r="22" fill="#41a6ff"/>
+      <line x1="-30" y1="0" x2="80" y2="0" stroke="url(#blade)" stroke-width="14"/>
+    </g>
+  </g>
+
+  <!-- skull -->
+  <g transform="translate(256 230)">
+    <ellipse cx="0" cy="-10" rx="78" ry="86" fill="#f4ece0" stroke="#0b1224" stroke-width="4"/>
+    <!-- jaw -->
+    <path d="M-58 50 Q0 110 58 50 L52 70 Q0 95 -52 70 Z" fill="#f4ece0" stroke="#0b1224" stroke-width="4"/>
+    <!-- eye sockets glowing blue -->
+    <ellipse cx="-26" cy="-12" rx="20" ry="14" fill="#0b1224"/>
+    <ellipse cx="26" cy="-12" rx="20" ry="14" fill="#0b1224"/>
+    <ellipse cx="-26" cy="-12" rx="14" ry="9" fill="#41a6ff" filter="url(#soft)"/>
+    <ellipse cx="26" cy="-12" rx="14" ry="9" fill="#41a6ff" filter="url(#soft)"/>
+    <!-- nose -->
+    <path d="M-6 16 L0 4 L6 16 Z" fill="#0b1224"/>
+    <!-- teeth -->
+    <g stroke="#0b1224" stroke-width="2">
+      <line x1="-30" y1="58" x2="-30" y2="78"/>
+      <line x1="-15" y1="58" x2="-15" y2="80"/>
+      <line x1="0"   y1="58" x2="0"   y2="82"/>
+      <line x1="15"  y1="58" x2="15"  y2="80"/>
+      <line x1="30"  y1="58" x2="30"  y2="78"/>
+    </g>
+    <!-- hair tuft / pompadour -->
+    <path d="M-70 -60 Q-30 -130 0 -90 Q30 -130 70 -60 Q40 -100 0 -78 Q-40 -100 -70 -60 Z" fill="#3a2a1c" stroke="#0b1224" stroke-width="3"/>
+    <!-- beard -->
+    <path d="M-62 30 Q-50 100 0 110 Q50 100 62 30 Q40 70 0 70 Q-40 70 -62 30 Z" fill="#3a2a1c" stroke="#0b1224" stroke-width="3"/>
+  </g>
+
+  <!-- BARBER GO banner -->
+  <g transform="translate(256 380)">
+    <rect x="-200" y="-34" width="400" height="68" rx="16" fill="#0b1224" stroke="#41a6ff" stroke-width="3"/>
+    <rect x="-196" y="-30" width="392" height="60" rx="12" fill="url(#bg)"/>
+    <text x="-86" y="14" text-anchor="end" font-family="Impact, 'Arial Black', system-ui, sans-serif"
+          font-size="56" font-weight="900" fill="url(#barberSilver)" letter-spacing="2">BARBER</text>
+    <text x="-72" y="14" text-anchor="start" font-family="Impact, 'Arial Black', system-ui, sans-serif"
+          font-size="56" font-weight="900" fill="url(#goBlue)" letter-spacing="2">GO</text>
+  </g>
+
+  <!-- razor + comb at bottom -->
+  <g transform="translate(140 430) rotate(-12)" stroke="#0b1224" stroke-width="3">
+    <rect x="0" y="0" width="100" height="14" rx="4" fill="url(#blade)"/>
+    <rect x="-30" y="2" width="34" height="10" rx="3" fill="#3a2a1c"/>
+  </g>
+  <g transform="translate(290 432)" stroke="#0b1224" stroke-width="3">
+    <rect x="0" y="0" width="110" height="16" rx="3" fill="#1a2c4a"/>
+    <g stroke="#0b1224" stroke-width="2">
+      <line x1="10" y1="16" x2="10" y2="28"/>
+      <line x1="22" y1="16" x2="22" y2="28"/>
+      <line x1="34" y1="16" x2="34" y2="28"/>
+      <line x1="46" y1="16" x2="46" y2="28"/>
+      <line x1="58" y1="16" x2="58" y2="28"/>
+      <line x1="70" y1="16" x2="70" y2="28"/>
+      <line x1="82" y1="16" x2="82" y2="28"/>
+      <line x1="94" y1="16" x2="94" y2="28"/>
+    </g>
+  </g>
+</svg>

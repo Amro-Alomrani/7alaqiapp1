@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <!-- Firebase -->
+        <domain includeSubdomains="true">firebaseapp.com</domain>
+        <domain includeSubdomains="true">firebase.google.com</domain>
+        <domain includeSubdomains="true">googleapis.com</domain>
+        <domain includeSubdomains="true">firebasestorage.googleapis.com</domain>
+        <domain includeSubdomains="true">firestore.googleapis.com</domain>
+        <!-- Maps & routing -->
+        <domain includeSubdomains="true">basemaps.cartocdn.com</domain>
+        <domain includeSubdomains="true">tile.openstreetmap.org</domain>
+        <domain includeSubdomains="true">router.project-osrm.org</domain>
+        <!-- Avatars -->
+        <domain includeSubdomains="true">pravatar.cc</domain>
+        <domain includeSubdomains="true">ui-avatars.com</domain>
+        <!-- Firebase Storage images -->
+        <domain includeSubdomains="true">storage.googleapis.com</domain>
+        <!-- Google Maps directions -->
+        <domain includeSubdomains="true">maps.googleapis.com</domain>
+        <domain includeSubdomains="true">www.google.com</domain>
+    </domain-config>
+</network-security-config>

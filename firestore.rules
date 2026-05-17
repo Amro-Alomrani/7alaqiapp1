@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /barbers/{barberId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /posts/{postId} {
+      allow read: if true;
+      allow create, update, delete: if true;
+    }
+
+    match /bookings/{bookingId} {
+      allow read, create, update, delete: if true;
+    }
+
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create, update, delete: if true;
+    }
+
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /notifications/{nid} {
+      allow read, write: if true;
+    }
+
+    match /staff/{staffId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /payouts/{payoutId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /checkins/{checkinId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /messages/{msgId} {
+      allow read, write: if true;
+      match /msgs/{subMsgId} {
+        allow read, write: if true;
+      }
+    }
+
+    match /referrals/{refId} {
+      allow read, write: if true;
+    }
+
+    match /follows/{followId} {
+      allow read, write: if true;
+    }
+  }
+}

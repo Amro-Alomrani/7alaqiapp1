@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "559982533825",
+    "firebase_url": "https://halaqyapp-default-rtdb.firebaseio.com",
+    "project_id": "halaqyapp",
+    "storage_bucket": "halaqyapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:559982533825:android:09d88e5eec3bd11d200840",
+        "android_client_info": {
+          "package_name": "jo.halaqi.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "559982533825-3650q1h57mmiuh50gcnti5iqqklcr8p0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCBRzHkkASsgW-o8WuCca6LsSjtXkNAYiE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "559982533825-3650q1h57mmiuh50gcnti5iqqklcr8p0.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
