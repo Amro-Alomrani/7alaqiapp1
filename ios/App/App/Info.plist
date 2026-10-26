@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>Barber Go</string>
+	<string>7alaqi</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -49,8 +49,6 @@
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Barber Go uses your location to find nearby barbers and salons.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Barber Go uses your location to show nearby barbers and track bookings.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Barber Go needs camera access to take profile pictures and try AI hairstyle previews.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
@@ -59,8 +57,6 @@
 	<string>Barber Go saves generated style previews to your photo library.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Barber Go uses the microphone for in-app voice messages.</string>
-	<key>NSUserTrackingUsageDescription</key>
-	<string>Your data is used to personalize barber recommendations and bookings.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UIBackgroundModes</key>

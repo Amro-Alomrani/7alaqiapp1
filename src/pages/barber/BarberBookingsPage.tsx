@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, X, Play, Flag, Clock, DollarSign, Phone, MapPin, Inbox, Navigation, MessageCircle, Bell } from 'lucide-react';
 import { toast } from 'sonner';
@@ -6,9 +6,10 @@ import { useNavigate } from 'react-router-dom';
 import { useLiveBooking } from '@/contexts/LiveBookingContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { pushNotification } from '@/lib/db';
+import { pushNotification, updateBarberLiveLocation } from '@/lib/db';
 import ServiceIconBadge from '@/components/ServiceIconBadge';
 import { LiveBooking, LiveBookingStatus } from '@/types';
+import { watchDeviceLocation } from '@/lib/location';
 
 type FilterKey = 'pending' | 'active' | 'completed' | 'cancelled';
 
@@ -41,6 +42,10 @@ export default function BarberBookingsPage() {
   const { allBookings, acceptBooking, rejectBooking, startBooking, completeBooking } = useLiveBooking();
   const { barberUser } = useAuth();
   const [filter, setFilter] = useState<FilterKey>('pending');
+  const [sharingLocation, setSharingLocation] = useState(false);
+  const [actionBusyId, setActionBusyId] = useState<string | null>(null);
+  const locationWatchRef = useRef<(() => void) | null>(null);
+  const lastLocationWriteRef = useRef(0);
 
   const barberId = barberUser?.uid || '';
   const myBookings = useMemo(
@@ -55,6 +60,57 @@ export default function BarberBookingsPage() {
   }, [myBookings]);
 
   const filtered = myBookings.filter(b => STATUS_TO_FILTER[b.status] === filter);
+  const activeTravelBooking = myBookings.find(b => ['accepted', 'preparing', 'your_turn', 'in_progress'].includes(b.status));
+
+  useEffect(() => {
+    if (!barberId) return;
+    if (!activeTravelBooking) { if (sharingLocation) setSharingLocation(false); return; }
+    if (!sharingLocation) return;
+    let active = true;
+    void watchDeviceLocation(
+      pos => {
+        const now = Date.now();
+        if (now - lastLocationWriteRef.current < 10_000) return;
+        lastLocationWriteRef.current = now;
+        void updateBarberLiveLocation(barberId, {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          heading: pos.coords.heading,
+          speed: pos.coords.speed,
+        }).catch(error => {
+          toast.error(ar ? 'تعذر إرسال موقعك المباشر' : 'Could not share your live location', {
+            description: error instanceof Error ? error.message : undefined,
+          });
+          setSharingLocation(false);
+        });
+      },
+      () => {
+        toast.error(ar ? 'تعذر تحديد الموقع الحالي' : 'Could not determine current location');
+        setSharingLocation(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+    ).then(stop => {
+      if (active) locationWatchRef.current = stop;
+      else stop();
+    }).catch(() => {
+      toast.error(ar ? 'تعذر بدء مشاركة الموقع' : 'Could not start location sharing');
+      setSharingLocation(false);
+    });
+    return () => {
+      active = false;
+      if (locationWatchRef.current) locationWatchRef.current();
+      locationWatchRef.current = null;
+    };
+  }, [sharingLocation, barberId, activeTravelBooking?.id, ar]);
+
+  const toggleLocationSharing = () => {
+    if (sharingLocation) {
+      setSharingLocation(false);
+      if (barberId) void updateBarberLiveLocation(barberId, null).catch(() => {});
+    } else {
+      setSharingLocation(true);
+    }
+  };
 
   const statusLabel = (s: LiveBookingStatus) => {
     const map: Record<LiveBookingStatus, string> = {
@@ -70,69 +126,25 @@ export default function BarberBookingsPage() {
     return map[s];
   };
 
-  const handleAccept = (b: LiveBooking) => {
-    acceptBooking(b.id);
-    toast.success(t.barberDash.acceptedToast);
-    if (b.customerId) {
-      void pushNotification(b.customerId, {
-        type: 'booking_update',
-        title: '✅ ' + (ar ? 'تم قبول حجزك!' : 'Booking Accepted!'),
-        body: `${barberUser?.name || ''} · ${b.service.name}`,
-        fromUid: barberId,
-        fromName: barberUser?.name || '',
-        bookingId: b.id,
-      });
+  const runBookingAction = async (bookingId: string, action: () => Promise<boolean>, successMessage: string) => {
+    if (actionBusyId) return;
+    setActionBusyId(bookingId);
+    try {
+      if (await action()) toast.success(successMessage);
+      else toast.error(ar ? 'تعذر تحديث الحجز. تحقق من الاتصال وحاول مجدداً.' : 'Could not update the booking. Check your connection and try again.');
+    } finally {
+      setActionBusyId(null);
     }
   };
 
-  const handleReject = (b: LiveBooking) => {
-    rejectBooking(b.id);
-    toast.error(t.barberDash.rejectedToast);
-    if (b.customerId) {
-      void pushNotification(b.customerId, {
-        type: 'booking_update',
-        title: '❌ ' + (ar ? 'تم رفض حجزك' : 'Booking Rejected'),
-        body: `${barberUser?.name || ''} · ${b.service.name}`,
-        fromUid: barberId,
-        fromName: barberUser?.name || '',
-        bookingId: b.id,
-      });
-    }
-  };
+  const handleAccept = (b: LiveBooking) => runBookingAction(b.id, () => acceptBooking(b.id), t.barberDash.acceptedToast);
+  const handleReject = (b: LiveBooking) => runBookingAction(b.id, () => rejectBooking(b.id), t.barberDash.rejectedToast);
+  const handleStart = (b: LiveBooking) => runBookingAction(b.id, () => startBooking(b.id), t.barberDash.start);
+  const handleComplete = (b: LiveBooking) => runBookingAction(b.id, () => completeBooking(b.id), t.barberDash.completedToast);
 
-  const handleStart = (b: LiveBooking) => {
-    startBooking(b.id);
-    toast.success(t.barberDash.start);
-    if (b.customerId) {
-      void pushNotification(b.customerId, {
-        type: 'booking_update',
-        title: '✂️ ' + (ar ? 'بدأت الخدمة!' : 'Service Started!'),
-        body: `${b.service.name}`,
-        fromUid: barberId,
-        fromName: barberUser?.name || '',
-        bookingId: b.id,
-      });
-    }
-  };
-
-  const handleComplete = (b: LiveBooking) => {
-    completeBooking(b.id);
-    toast.success(t.barberDash.completedToast);
-    if (b.customerId) {
-      void pushNotification(b.customerId, {
-        type: 'booking_update',
-        title: '🎉 ' + (ar ? 'اكتملت الخدمة!' : 'Service Complete!'),
-        body: ar ? 'شكراً لزيارتك!' : 'Thanks for your visit!',
-        fromUid: barberId,
-        fromName: barberUser?.name || '',
-        bookingId: b.id,
-      });
-    }
-  };
-
-  const sendAlert = (b: LiveBooking) => {
+  const sendAlert = async (b: LiveBooking) => {
     if (!b.customerId) return;
-    void pushNotification(b.customerId, {
+    const sent = await pushNotification(b.customerId, {
       type: 'message',
       title: `🔔 ${barberUser?.name || (ar ? 'الحلاق' : 'Barber')}`,
       body: ar ? 'لديك تنبيه من الحلاق' : 'You have an alert from your barber',
@@ -140,7 +152,8 @@ export default function BarberBookingsPage() {
       fromName: barberUser?.name || '',
       bookingId: b.id,
     });
-    toast.success(ar ? '📲 تم إرسال التنبيه للعميل' : '📲 Alert sent to customer');
+    if (sent) toast.success(ar ? '📲 تم إرسال التنبيه للعميل' : '📲 Alert sent to customer');
+    else toast.error(ar ? 'تعذر إرسال التنبيه. تحقق من الاتصال.' : 'Could not send the alert. Check your connection.');
   };
 
   const tabs: { key: FilterKey; label: string }[] = [
@@ -152,6 +165,18 @@ export default function BarberBookingsPage() {
 
   return (
     <div className="min-h-screen" dir={ar ? 'rtl' : 'ltr'}>
+      {activeTravelBooking && (
+        <div className="mx-5 mt-4 mb-2 rounded-2xl border border-primary/25 bg-primary/10 p-4 flex items-center gap-3">
+          <MapPin size={20} className="text-primary shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-foreground">{ar ? 'مشاركة موقعك مع الزبون' : 'Share your location with the customer'}</p>
+            <p className="text-xs text-muted-foreground">{ar ? 'يظهر موقعك الحي ووقت الوصول للحجز الحالي فقط' : 'Your live location and ETA are shared for this active booking only'}</p>
+          </div>
+          <button onClick={toggleLocationSharing} className={`px-3 py-2 rounded-xl text-xs font-bold ${sharingLocation ? 'bg-green-600 text-white' : 'bg-primary text-primary-foreground'}`}>
+            {sharingLocation ? (ar ? 'إيقاف' : 'Stop') : (ar ? 'بدء المشاركة' : 'Share')}
+          </button>
+        </div>
+      )}
       <div className="px-5 pt-14 pb-4 sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border">
         <h1 className="text-2xl font-black text-foreground">{t.barberDash.bookings}</h1>
         <p className="text-sm text-muted-foreground mt-0.5">{myBookings.length} {t.barberDash.total}</p>
@@ -273,10 +298,12 @@ export default function BarberBookingsPage() {
                 {b.status === 'requested' && (
                   <div className="flex gap-2">
                     <button onClick={() => handleReject(b)}
+                      disabled={actionBusyId === b.id}
                       className="flex-1 h-10 rounded-xl bg-red-500/15 text-red-500 border border-red-500/30 font-semibold text-sm flex items-center justify-center gap-1.5">
                       <X size={14} /> {t.barberDash.reject}
                     </button>
                     <button onClick={() => handleAccept(b)}
+                      disabled={actionBusyId === b.id}
                       className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground font-semibold text-sm flex items-center justify-center gap-1.5">
                       <Check size={14} /> {t.barberDash.accept}
                     </button>
@@ -284,12 +311,14 @@ export default function BarberBookingsPage() {
                 )}
                 {(b.status === 'accepted' || b.status === 'preparing' || b.status === 'your_turn') && (
                   <button onClick={() => handleStart(b)}
+                    disabled={actionBusyId === b.id}
                     className="w-full h-10 rounded-xl bg-blue-500 text-white font-semibold text-sm flex items-center justify-center gap-1.5">
                     <Play size={14} /> {t.barberDash.start}
                   </button>
                 )}
                 {b.status === 'in_progress' && (
                   <button onClick={() => handleComplete(b)}
+                    disabled={actionBusyId === b.id}
                     className="w-full h-10 rounded-xl bg-green-500 text-white font-semibold text-sm flex items-center justify-center gap-1.5">
                     <Flag size={14} /> {t.barberDash.complete}
                   </button>

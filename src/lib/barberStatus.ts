@@ -2,7 +2,7 @@ import { eventBus } from './realtime';
 import { updateBarberProfile } from './db';
 import type { LiveStatus } from '@/types';
 
-export type BarberStatus = LiveStatus | 'closed';
+export type BarberStatus = LiveStatus;
 
 export interface BarberStatusEntry {
   status: BarberStatus;
@@ -47,7 +47,7 @@ export function setBarberStatus(
   saveAll(map);
   eventBus.emit('barber_status_changed', { barberId, ...entry });
   void updateBarberProfile(barberId, {
-    liveStatus: status === 'closed' ? 'busy' : (status as LiveStatus),
+    liveStatus: status,
     available: status !== 'closed',
     liveEta: extra?.liveEta,
     liveActivity: extra?.liveActivity,
@@ -60,8 +60,8 @@ export function clearBarberStatus(barberId: string) {
   saveAll(map);
   eventBus.emit('barber_status_changed', { barberId, status: null });
   void updateBarberProfile(barberId, {
-    liveStatus: 'available',
-    available: true,
+    liveStatus: 'closed',
+    available: false,
     liveEta: undefined,
     liveActivity: undefined,
   } as any).catch(() => {});

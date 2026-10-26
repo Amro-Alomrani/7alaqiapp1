@@ -1,25 +1,43 @@
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Clock, RotateCcw, ArrowLeft, XCircle } from 'lucide-react';
+import { Calendar, Clock, RotateCcw, ArrowLeft, XCircle, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { useBookings } from '@/contexts/BookingContext';
-import { Booking } from '@/types';
+import { useLiveBooking } from '@/contexts/LiveBookingContext';
+import type { LiveBooking, LiveBookingStatus } from '@/types';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useState } from 'react';
+import { toast } from 'sonner';
 
-const statusStyle = {
-  upcoming: 'bg-blue-500/15 text-blue-400 border border-blue-500/20',
+const statusStyle: Record<'active' | 'completed' | 'cancelled', string> = {
+  active: 'bg-blue-500/15 text-blue-400 border border-blue-500/20',
   completed: 'bg-green-500/15 text-green-400 border border-green-500/20',
   cancelled: 'bg-destructive/15 text-destructive border border-destructive/20',
 };
 
-function BookingCard({ booking, index, onCancel, ar }: { booking: Booking; index: number; onCancel?: (id: string) => void; ar: boolean }) {
-  const navigate = useNavigate();
+function bookingGroup(status: LiveBookingStatus): 'active' | 'completed' | 'cancelled' {
+  if (status === 'completed') return 'completed';
+  if (status === 'cancelled' || status === 'rejected') return 'cancelled';
+  return 'active';
+}
 
-  const statusLabel: Record<string, string> = {
-    upcoming: ar ? 'قادم' : 'Upcoming',
-    completed: ar ? 'مكتمل' : 'Completed',
-    cancelled: ar ? 'ملغي' : 'Cancelled',
+function statusName(status: LiveBookingStatus, ar: boolean): string {
+  const labels: Record<LiveBookingStatus, [string, string]> = {
+    requested: ['بانتظار تأكيد الحلاق', 'Awaiting barber confirmation'],
+    accepted: ['تم تأكيد الحجز', 'Confirmed'],
+    preparing: ['الحلاق يستعد', 'Preparing'],
+    your_turn: ['دورك الآن', 'Your turn'],
+    in_progress: ['الخدمة جارية', 'In progress'],
+    completed: ['مكتمل', 'Completed'],
+    cancelled: ['ملغي', 'Cancelled'],
+    rejected: ['مرفوض', 'Declined'],
   };
+  return labels[status][ar ? 0 : 1];
+}
+
+function BookingCard({ booking, index, onCancel, ar }: { booking: LiveBooking; index: number; onCancel?: (id: string) => void | Promise<void>; ar: boolean }) {
+  const navigate = useNavigate();
+  const [cancelling, setCancelling] = useState(false);
+  const group = bookingGroup(booking.status);
 
   return (
     <motion.div
@@ -37,8 +55,8 @@ function BookingCard({ booking, index, onCancel, ar }: { booking: Booking; index
           <p className="font-semibold text-foreground text-sm truncate">{booking.barberShop}</p>
           <p className="text-xs text-muted-foreground">{booking.barberName}</p>
         </div>
-        <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${statusStyle[booking.status]}`}>
-          {statusLabel[booking.status] || booking.status}
+        <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${statusStyle[group]}`}>
+          {statusName(booking.status, ar)}
         </span>
       </div>
       <div className="px-4 py-3 space-y-2">
@@ -58,10 +76,10 @@ function BookingCard({ booking, index, onCancel, ar }: { booking: Booking; index
             <Clock size={11} />
             <span>{booking.time}</span>
           </div>
-          <div className="ms-auto text-primary font-medium">+{booking.pointsEarned} {ar ? 'نقطة' : 'pts'}</div>
+          {booking.homeService && <span className="ms-auto text-primary font-medium">{ar ? 'خدمة منزلية' : 'Home service'}</span>}
         </div>
       </div>
-      {booking.status === 'completed' && (
+      {group === 'completed' && (
         <div className="px-4 pb-3">
           <Button
             variant="outline"
@@ -74,15 +92,21 @@ function BookingCard({ booking, index, onCancel, ar }: { booking: Booking; index
           </Button>
         </div>
       )}
-      {booking.status === 'upcoming' && onCancel && (
+      {group === 'active' && ['requested', 'accepted'].includes(booking.status) && onCancel && (
         <div className="px-4 pb-3">
           <Button
             variant="outline"
             size="sm"
             className="w-full h-8 text-xs gap-1.5 rounded-xl text-red-400 border-red-400/30 hover:bg-red-400/10"
-            onClick={() => onCancel(booking.id)}
+            disabled={cancelling}
+            onClick={async () => {
+              if (cancelling) return;
+              setCancelling(true);
+              try { await onCancel(booking.id); }
+              finally { setCancelling(false); }
+            }}
           >
-            <XCircle size={12} />
+            {cancelling ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />}
             {ar ? 'إلغاء الحجز' : 'Cancel Booking'}
           </Button>
         </div>
@@ -95,9 +119,15 @@ export default function HistoryPage() {
   const navigate = useNavigate();
   const { language, isRTL } = useLanguage();
   const ar = language === 'ar';
-  const { bookings, cancelBooking, getUpcoming } = useBookings();
-  const upcoming = getUpcoming();
-  const past = bookings.filter(b => b.status !== 'upcoming');
+  const { bookingHistory, cancelBooking } = useLiveBooking();
+  const upcoming = bookingHistory.filter(b => bookingGroup(b.status) === 'active');
+  const past = bookingHistory.filter(b => bookingGroup(b.status) !== 'active');
+
+  const cancelHistoryBooking = async (id: string) => {
+    if (!await cancelBooking(id)) {
+      toast.error(ar ? 'تعذر إلغاء الحجز. تحقق من الاتصال وحاول مجدداً.' : 'Could not cancel this booking. Check your connection and try again.');
+    }
+  };
 
   return (
     <div className="min-h-screen pb-28 overflow-y-auto" dir={isRTL ? 'rtl' : 'ltr'}>
@@ -108,7 +138,7 @@ export default function HistoryPage() {
         <div>
           <h1 className="text-xl font-bold">{ar ? 'حجوزاتي' : 'My Bookings'}</h1>
           <p className="text-sm text-muted-foreground">
-            {ar ? `${bookings.length} حجز` : `${bookings.length} total appointments`}
+            {ar ? `${bookingHistory.length} حجز` : `${bookingHistory.length} total appointments`}
           </p>
         </div>
       </div>
@@ -120,7 +150,7 @@ export default function HistoryPage() {
               {ar ? 'قادمة' : 'Upcoming'}
             </h2>
             <div className="space-y-3">
-              {upcoming.map((b, i) => <BookingCard key={b.id} booking={b} index={i} onCancel={cancelBooking} ar={ar} />)}
+              {upcoming.map((b, i) => <BookingCard key={b.id} booking={b} index={i} onCancel={cancelHistoryBooking} ar={ar} />)}
             </div>
           </div>
         )}
@@ -134,7 +164,7 @@ export default function HistoryPage() {
             </div>
           </div>
         )}
-        {bookings.length === 0 && (
+        {bookingHistory.length === 0 && (
           <div className="text-center py-16">
             <p className="text-4xl mb-3">📋</p>
             <p className="font-bold text-foreground">{ar ? 'لا توجد حجوزات بعد' : 'No bookings yet'}</p>

@@ -14,6 +14,7 @@ import {
   deletePost,
 } from '@/lib/db';
 import {
+  describeImageUploadError,
   pickImage,
   uploadImage,
   profileImagePath,
@@ -35,6 +36,9 @@ export default function BarberProfilePage() {
   const [bio, setBio] = useState('');
   const [name, setName] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
+  const [savingHomeService, setSavingHomeService] = useState(false);
+  const [savingHomeServiceFee, setSavingHomeServiceFee] = useState(false);
+  const [homeServiceFeeDraft, setHomeServiceFeeDraft] = useState('0');
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [uploadingCover, setUploadingCover] = useState(false);
 
@@ -51,6 +55,7 @@ export default function BarberProfilePage() {
     setShopName(barber.shopName || '');
     setBio((barber as any).description || '');
     setName(barber.name || '');
+    setHomeServiceFeeDraft(String(barber.homeServiceFee ?? 0));
   }, [barber?.id]);
 
   const handleAvatar = async () => {
@@ -63,7 +68,7 @@ export default function BarberProfilePage() {
       await updateBarberProfile(uid, { avatar: url });
       toast.success(ar ? 'تم تحديث الصورة' : 'Avatar updated');
     } catch (e: any) {
-      toast.error(ar ? 'فشل رفع الصورة' : (e?.message || 'Upload failed'));
+      toast.error(ar ? 'فشل رفع الصورة' : 'Upload failed', { description: describeImageUploadError(e, ar) });
     } finally {
       setUploadingAvatar(false);
     }
@@ -79,7 +84,7 @@ export default function BarberProfilePage() {
       await updateBarberProfile(uid, { coverImage: url } as any);
       toast.success(ar ? 'تم تحديث الغلاف' : 'Cover updated');
     } catch (e: any) {
-      toast.error(ar ? 'فشل رفع الغلاف' : (e?.message || 'Upload failed'));
+      toast.error(ar ? 'فشل رفع الغلاف' : 'Upload failed', { description: describeImageUploadError(e, ar) });
     } finally {
       setUploadingCover(false);
     }
@@ -100,6 +105,49 @@ export default function BarberProfilePage() {
       toast.error(ar ? 'فشل الحفظ' : (e?.message || 'Save failed'));
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  const handleHomeServiceToggle = async () => {
+    if (!uid || !barber || savingHomeService) return;
+    const homeServiceFee = Number(homeServiceFeeDraft);
+    if (!Number.isFinite(homeServiceFee) || homeServiceFee < 0) {
+      toast.error(ar ? 'أدخل رسماً صحيحاً أو صفراً' : 'Enter a valid fee or zero');
+      return;
+    }
+    const nextValue = barber.offersHomeService !== true;
+    setSavingHomeService(true);
+    try {
+      await updateBarberProfile(uid, { offersHomeService: nextValue, homeServiceFee });
+      toast.success(nextValue
+        ? (ar ? 'أصبحت تستقبل طلبات الخدمة المنزلية' : 'Home-service requests are enabled')
+        : (ar ? 'تم إيقاف استقبال طلبات الخدمة المنزلية' : 'Home-service requests are disabled'));
+    } catch (error) {
+      toast.error(ar ? 'تعذر تحديث إعداد الخدمة المنزلية' : 'Could not update home-service setting', {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setSavingHomeService(false);
+    }
+  };
+
+  const handleSaveHomeServiceFee = async () => {
+    if (!uid || !barber || savingHomeServiceFee) return;
+    const homeServiceFee = Number(homeServiceFeeDraft);
+    if (!Number.isFinite(homeServiceFee) || homeServiceFee < 0) {
+      toast.error(ar ? 'أدخل رسماً صحيحاً أو صفراً' : 'Enter a valid fee or zero');
+      return;
+    }
+    setSavingHomeServiceFee(true);
+    try {
+      await updateBarberProfile(uid, { homeServiceFee });
+      toast.success(ar ? 'تم حفظ رسم الخدمة المنزلية' : 'Home-service fee saved');
+    } catch (error) {
+      toast.error(ar ? 'تعذر حفظ الرسم' : 'Could not save the fee', {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setSavingHomeServiceFee(false);
     }
   };
 
@@ -168,7 +216,7 @@ export default function BarberProfilePage() {
       }
       setPostOpen(false);
     } catch (e: any) {
-      toast.error(ar ? 'فشل الحفظ' : (e?.message || 'Failed'));
+      toast.error(ar ? 'فشل الحفظ' : 'Save failed', { description: postImageFile ? describeImageUploadError(e, ar) : (e?.message || '') });
     } finally {
       setSavingPost(false);
     }
@@ -283,6 +331,41 @@ export default function BarberProfilePage() {
               <p className="text-[10px] text-muted-foreground mt-0.5">{label}</p>
             </div>
           ))}
+        </div>
+
+        <div className="bg-card border border-border rounded-2xl p-4 mb-6 flex items-center gap-3">
+          <div className="flex-1">
+            <p className="text-sm font-bold text-foreground">{ar ? 'استقبال الخدمة المنزلية' : 'Accept home-service requests'}</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {ar ? 'فعّلها فقط إذا كنت تقدم زيارات منزلية. يجب تسجيل خدمة وساعات دوام أولاً.' : 'Enable only if you offer home visits. Add a service and working hours first.'}
+            </p>
+            <div className="flex items-center gap-2 mt-3">
+              <label htmlFor="home-service-fee" className="text-xs text-muted-foreground">{ar ? 'رسم الزيارة (د.أ)' : 'Visit fee (JOD)'}</label>
+              <input
+                id="home-service-fee"
+                type="number"
+                min="0"
+                step="0.25"
+                value={homeServiceFeeDraft}
+                onChange={event => setHomeServiceFeeDraft(event.target.value)}
+                className="w-20 rounded-lg border border-border bg-background px-2 py-1 text-sm text-foreground"
+              />
+              <button type="button" onClick={() => void handleSaveHomeServiceFee()} disabled={savingHomeServiceFee || !barber}
+                className="text-xs font-bold text-primary disabled:opacity-50">
+                {savingHomeServiceFee ? (ar ? 'جارٍ الحفظ...' : 'Saving...') : (ar ? 'حفظ الرسم' : 'Save fee')}
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={barber?.offersHomeService === true}
+            disabled={savingHomeService || !barber || !barber.services?.length || !barber.workingHours?.days?.length}
+            onClick={() => void handleHomeServiceToggle()}
+            className={`relative w-12 h-7 rounded-full transition-colors disabled:opacity-50 ${barber?.offersHomeService === true ? 'bg-primary' : 'bg-muted'}`}
+          >
+            <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform ${barber?.offersHomeService === true ? 'translate-x-6' : 'translate-x-1'}`} />
+          </button>
         </div>
 
         <div className="mb-6">
@@ -434,6 +517,9 @@ export default function BarberProfilePage() {
           </motion.div>
         )}
       </AnimatePresence>
+      <button onClick={() => navigate('/delete-account')} className="mx-5 mt-4 flex w-[calc(100%-2.5rem)] items-center justify-center gap-2 py-3 text-xs font-semibold text-destructive/80">
+        <Trash2 size={14} />{ar ? 'طلب حذف الحساب والبيانات' : 'Request account and data deletion'}
+      </button>
     </div>
   );
 }

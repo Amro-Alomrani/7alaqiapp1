@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSafeBack } from "@/hooks/useSafeBack";
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Bell, BellOff, Zap, Users, Clock, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -8,6 +9,7 @@ import { Button } from '@/components/ui/button';
 
 export default function QueuePage() {
   const navigate = useNavigate();
+  const safeBack = useSafeBack();
   const { state } = useLocation();
   const allBarbers = useBarbers();
   const { language, isRTL } = useLanguage();
@@ -16,7 +18,7 @@ export default function QueuePage() {
   const pos: number = state?.position ?? 3;
   const initialWait: number = state?.waitTime ?? 22;
   const barberName: string = state?.barberName ?? (ar ? 'أحمد الرشيد' : 'Ahmed Al-Rasheed');
-  const barberAvatar: string = state?.barberAvatar ?? 'https://i.pravatar.cc/150?img=52';
+  const barberAvatar: string = state?.barberAvatar ?? '/logo.png';
   const salonName: string = state?.salonName ?? (ar ? 'صالون الفخامة' : 'The Grand Barbershop');
 
   const [waitLeft, setWaitLeft] = useState(initialWait);
@@ -44,7 +46,7 @@ export default function QueuePage() {
   return (
     <div className="min-h-screen flex flex-col overflow-y-auto pb-10" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="flex items-center gap-3 px-5 pt-14 pb-4">
-        <button onClick={() => navigate(-1)} className="w-10 h-10 bg-card border border-border rounded-full flex items-center justify-center">
+        <button onClick={() => safeBack()} className="w-10 h-10 bg-card border border-border rounded-full flex items-center justify-center">
           <ArrowLeft size={18} className={isRTL ? 'rotate-180' : ''} />
         </button>
         <div>
@@ -203,7 +205,7 @@ export default function QueuePage() {
       )}
 
       <div className="mx-5 flex gap-2">
-        <Button variant="outline" onClick={() => navigate(-1)} className="flex-1 h-12 rounded-2xl gap-2 text-destructive border-destructive/20">
+        <Button variant="outline" onClick={() => safeBack()} className="flex-1 h-12 rounded-2xl gap-2 text-destructive border-destructive/20">
           <LogOut size={16} />
           {ar ? 'مغادرة الطابور' : 'Leave Queue'}
         </Button>

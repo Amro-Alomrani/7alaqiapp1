@@ -1,13 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useSafeBack } from "@/hooks/useSafeBack";
 import { useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Polyline, useMap } from 'react-leaflet';
+import MapTileLayer from '@/components/maps/MapTileLayer';
 import L from 'leaflet';
 import { ArrowLeft, Navigation, Phone, MessageCircle, MapPin, Clock, Wifi } from 'lucide-react';
 import { useLiveBooking } from '@/contexts/LiveBookingContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { pushNotification, updateCustomerLocation } from '@/lib/db';
+import { LiveBarberLocation, pushNotification, subscribeBarberLiveLocation, updateCustomerLocation } from '@/lib/db';
 import 'leaflet/dist/leaflet.css';
+import { watchDeviceLocation } from '@/lib/location';
+import { toast } from 'sonner';
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -52,6 +56,7 @@ function distanceKm(a: [number, number], b: [number, number]) {
 
 export default function TrackingPage() {
   const navigate = useNavigate();
+  const safeBack = useSafeBack();
   const { activeBooking } = useLiveBooking();
   const { language } = useLanguage();
   const { customer } = useAuth();
@@ -61,16 +66,30 @@ export default function TrackingPage() {
   const [routePoints, setRoutePoints] = useState<[number, number][]>([]);
   const [distKm, setDistKm] = useState<string | null>(null);
   const [etaMin, setEtaMin] = useState<number | null>(null);
-  const [tracking, setTracking] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [barberLocation, setBarberLocation] = useState<LiveBarberLocation | null>(null);
 
-  const watchIdRef = useRef<number | null>(null);
+  const watchIdRef = useRef<(() => void) | null>(null);
   const notifIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastFsWriteRef = useRef<number>(0);
 
-  const salonPos: [number, number] = activeBooking?.salonLocation
-    ? [activeBooking.salonLocation.lat, activeBooking.salonLocation.lng]
-    : [31.9539, 35.9106];
+  const salonPos: [number, number] | null = barberLocation
+    ? [barberLocation.lat, barberLocation.lng]
+    : activeBooking?.salonLocation
+      ? [activeBooking.salonLocation.lat, activeBooking.salonLocation.lng]
+      : null;
+  const barberLive = !!barberLocation && Date.now() - barberLocation.updatedAt < 60_000;
+
+  useEffect(() => {
+    if (!activeBooking?.barberId) return;
+    return subscribeBarberLiveLocation(activeBooking.barberId, setBarberLocation);
+  }, [activeBooking?.barberId]);
+
+  useEffect(() => {
+    if (activeBooking?.customerLocation) {
+      setUserPos([activeBooking.customerLocation.lat, activeBooking.customerLocation.lng]);
+    }
+  }, [activeBooking?.id, activeBooking?.customerLocation?.lat, activeBooking?.customerLocation?.lng]);
 
   const fetchRoute = useCallback(async (from: [number, number], to: [number, number]) => {
     try {
@@ -121,27 +140,33 @@ export default function TrackingPage() {
   }, [activeBooking, customer, distKm, etaMin, ar]);
 
   useEffect(() => {
-    if (!navigator.geolocation) return;
-    setTracking(true);
-    watchIdRef.current = navigator.geolocation.watchPosition(
+    let active = true;
+    void watchDeviceLocation(
       pos => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
         const p: [number, number] = [lat, lng];
         setUserPos(p);
-        fetchRoute(p, salonPos);
         writeLocationToFs(lat, lng);
       },
-      () => {
-        setTracking(false);
-        setUserPos(salonPos); // fallback
+      err => {
+        toast.error(ar ? 'تعذر تحديث موقعك المباشر' : 'Could not update your live location', { description: err.message });
       },
       { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
-    );
+    ).then(stop => {
+      if (active) watchIdRef.current = stop;
+      else stop();
+    }).catch(() => {});
     return () => {
-      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+      active = false;
+      if (watchIdRef.current) watchIdRef.current();
+      watchIdRef.current = null;
     };
-  }, []);
+  }, [writeLocationToFs, ar]);
+
+  useEffect(() => {
+    if (userPos && salonPos) void fetchRoute(userPos, salonPos);
+  }, [userPos, salonPos?.[0], salonPos?.[1], fetchRoute]);
 
   useEffect(() => {
     notifIntervalRef.current = setInterval(sendBarberNotif, 5 * 60 * 1000);
@@ -160,31 +185,31 @@ export default function TrackingPage() {
     );
   }
 
-  const mapCenter: [number, number] = userPos
+  const mapCenter: [number, number] = userPos && salonPos
     ? [(userPos[0] + salonPos[0]) / 2, (userPos[1] + salonPos[1]) / 2]
-    : salonPos;
+    : userPos || salonPos || [31.9539, 35.9106];
 
   return (
     <div className="min-h-screen flex flex-col relative" dir={ar ? 'rtl' : 'ltr'}>
       <div className="absolute top-0 left-0 right-0 z-[1000] px-4 pt-12 pb-3">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)}
+          <button onClick={() => safeBack()}
             className="w-10 h-10 bg-card/95 backdrop-blur-sm border border-border rounded-full flex items-center justify-center shadow-lg">
             <ArrowLeft size={18} className={ar ? 'rotate-180' : ''} />
           </button>
           <div className="flex-1 bg-card/95 backdrop-blur-sm border border-border rounded-2xl px-4 py-2.5 shadow-lg">
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${tracking ? 'bg-green-400 animate-pulse' : 'bg-muted-foreground'}`} />
+              <div className={`w-2 h-2 rounded-full ${barberLive ? 'bg-green-400 animate-pulse' : 'bg-muted-foreground'}`} />
               <p className="text-sm font-bold text-foreground">
                 {ar ? 'تتبع مباشر' : 'Live Tracking'}
               </p>
-              {tracking && (
+              {barberLive && (
                 <span className="text-[10px] text-green-500 font-bold bg-green-500/10 px-1.5 py-0.5 rounded-full">LIVE</span>
               )}
             </div>
             <p className="text-xs text-muted-foreground">{activeBooking.barberShop}</p>
           </div>
-          {userPos && (
+          {userPos && salonPos && (
             <button
               onClick={() => window.open(`https://www.google.com/maps/dir/${userPos[0]},${userPos[1]}/${salonPos[0]},${salonPos[1]}`, '_blank')}
               className="flex items-center gap-1.5 bg-primary text-primary-foreground font-bold px-3 py-2 rounded-2xl text-xs shadow-lg"
@@ -202,12 +227,12 @@ export default function TrackingPage() {
         className="flex-1 w-full"
         style={{ height: '62vh' }}
         zoomControl={false}
-        attributionControl={false}
+        attributionControl
       >
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="" />
-        {userPos && <FitBounds points={[userPos, salonPos]} />}
+        <MapTileLayer />
+        {userPos && salonPos && <FitBounds points={[userPos, salonPos]} />}
         {userPos && <Marker position={userPos} icon={ME_ICON} />}
-        <Marker position={salonPos} icon={SALON_ICON} />
+        {salonPos && <Marker position={salonPos} icon={SALON_ICON} />}
         {routePoints.length > 1 && (
           <Polyline
             positions={routePoints}
@@ -224,7 +249,7 @@ export default function TrackingPage() {
             </div>
             <div>
               <p className="text-xl font-black text-foreground">
-                {etaMin !== null ? `${etaMin} ${ar ? 'دقيقة' : 'min'}` : '—'}
+                {salonPos && userPos && etaMin !== null ? `${etaMin} ${ar ? 'دقيقة' : 'min'}` : '—'}
               </p>
               <p className="text-[11px] text-muted-foreground">{ar ? 'وقت الوصول المتوقع' : 'Estimated arrival'}</p>
             </div>
@@ -235,7 +260,7 @@ export default function TrackingPage() {
             </div>
             <div>
               <p className="text-xl font-black text-foreground">
-                {distKm !== null ? `${distKm} km` : '—'}
+                {salonPos && userPos && distKm !== null ? `${distKm} km` : '—'}
               </p>
               <p className="text-[11px] text-muted-foreground">{ar ? 'المسافة المتبقية' : 'Distance'}</p>
             </div>
@@ -243,11 +268,13 @@ export default function TrackingPage() {
         </div>
 
         <div className="flex items-center gap-2 mb-4 px-1">
-          <Wifi size={12} className={tracking ? 'text-green-400' : 'text-muted-foreground'} />
+          <Wifi size={12} className={barberLive ? 'text-green-400' : 'text-muted-foreground'} />
           <span className="text-[11px] text-muted-foreground">
-            {tracking
-              ? (ar ? 'موقعك يُحدَّث للحلاق كل 30 ثانية' : 'Your location is shared with barber every 30s')
-              : (ar ? 'تعذّر تحديد الموقع' : 'Location unavailable')}
+            {barberLive
+              ? (ar ? 'موقع الحلاق مباشر — يتحدث باستمرار' : 'Barber location is live and updating')
+              : barberLocation
+                ? (ar ? 'آخر موقع للحلاق قديم؛ ننتظر تحديثاً جديداً' : 'Barber location is stale; waiting for a new update')
+                : (ar ? 'الحلاق لم يبدأ مشاركة الموقع بعد' : 'The barber has not started sharing location yet')}
           </span>
           {lastUpdated && (
             <span className="text-[10px] text-green-500 font-bold ms-auto">

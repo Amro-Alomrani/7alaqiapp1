@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSafeBack } from "@/hooks/useSafeBack";
 import { ArrowLeft, MessageCircle, Camera, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useLiveBooking } from '@/contexts/LiveBookingContext';
@@ -42,6 +43,7 @@ function usageTime(ts: number) {
 
 export default function MessagesPage() {
   const navigate = useNavigate();
+  const safeBack = useSafeBack();
   const { allBookings } = useLiveBooking();
   const { customer, barberUser } = useAuth();
   const { language, isRTL } = useLanguage();
@@ -117,7 +119,7 @@ export default function MessagesPage() {
     <div className="min-h-screen pb-28" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="px-5 pt-14 pb-4 sticky top-0 bg-background/95 backdrop-blur-sm z-10 border-b border-border">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)}
+          <button onClick={() => safeBack()}
             className="w-10 h-10 bg-card border border-border rounded-full flex items-center justify-center">
             <ArrowLeft size={18} className={isRTL ? 'rotate-180' : ''} />
           </button>

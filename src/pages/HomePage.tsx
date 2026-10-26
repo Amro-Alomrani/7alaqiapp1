@@ -1,4 +1,4 @@
-import { Search, MapPin, ChevronRight, Sparkles, Clock, Star, Zap, Trophy, Bell, Map, Sun, Moon, Languages } from 'lucide-react';
+import { Search, MapPin, ChevronRight, Clock, Star, Zap, Trophy, Bell, MessageCircle, Sun, Moon, Languages } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
@@ -40,7 +40,7 @@ export default function HomePage() {
   const barbers = useBarbers();
   const feedPosts = usePosts();
   const ar = language === 'ar';
-  const nearbyBarbers = barbers.filter(b => b.available || b.liveStatus === 'available').slice(0, 5);
+  const availableBarbers = barbers.filter(b => b.available || b.liveStatus === 'available').slice(0, 5);
   const topBarbers = [...barbers].filter(b => (b.rating || 0) > 0).sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 5);
   const availableNow = barbers.filter(b => b.available && b.liveStatus === 'available');
 
@@ -50,16 +50,13 @@ export default function HomePage() {
   const unreadCount = Math.max(0, activeNotifs - notifPrefs.getRead().size);
   const firstName = customer?.name?.split(' ')[0] || (ar ? 'مرحباً' : 'Hi');
 
-  const completedCount = allBookings.filter(b => b.status === 'completed').length;
-  const [loyaltyPoints, setLoyaltyPoints] = useState(0);
+  const [loyaltyPoints, setLoyaltyPoints] = useState<number | null>(null);
   useEffect(() => {
     if (!customer?.uid) return;
     getUser(customer.uid).then(u => {
-      setLoyaltyPoints(u?.loyaltyPoints ?? completedCount * 30);
-    }).catch(() => setLoyaltyPoints(completedCount * 30));
-  }, [customer?.uid, completedCount]);
-  const nextRewardAt = 500;
-  const loyaltyProgress = Math.min((loyaltyPoints / nextRewardAt) * 100, 100);
+      setLoyaltyPoints(u ? (u.loyaltyPoints ?? 0) : null);
+    }).catch(() => setLoyaltyPoints(null));
+  }, [customer?.uid]);
 
   return (
     <div className="flex flex-col gap-4 pb-32 overflow-y-auto min-h-screen">
@@ -128,7 +125,7 @@ export default function HomePage() {
         <div className="grid grid-cols-4 gap-2">
           {[
             { icon: '🗺️', label: t.home.quickActions.map, path: '/map', color: 'bg-blue-500/10' },
-            { icon: '⚡', label: t.home.quickActions.quickBook, path: '/explore', color: 'bg-yellow-500/10' },
+            { icon: '⚡', label: ar ? 'اطلب موعداً' : 'Request a booking', path: '/explore', color: 'bg-yellow-500/10' },
             { icon: '🚶', label: t.home.quickActions.walkIn, path: availableNow[0] ? `/barbers/${availableNow[0].id}` : '/explore', color: 'bg-green-500/10' },
             { icon: '🏠', label: t.home.quickActions.homeService, path: '/home-service', color: 'bg-purple-500/10' },
           ].map((action, i) => (
@@ -150,15 +147,15 @@ export default function HomePage() {
       <div>
         <div className="flex items-center justify-between px-5 mb-3">
           <div className="flex items-center gap-2">
-            <h2 className="text-base font-black text-foreground">{ar ? 'حلاقون بالقرب منك' : 'Barbers Near You'}</h2>
-            <span className="text-[10px] bg-green-500/15 text-green-400 px-2 py-0.5 rounded-full font-bold">{nearbyBarbers.length} {t.home.openCount}</span>
+            <h2 className="text-base font-black text-foreground">{ar ? 'حلاقون متاحون' : 'Available Barbers'}</h2>
+            <span className="text-[10px] bg-green-500/15 text-green-400 px-2 py-0.5 rounded-full font-bold">{availableBarbers.length} {ar ? 'متاح' : 'available'}</span>
           </div>
-          <button onClick={() => navigate('/map')} className="text-primary text-xs font-bold flex items-center gap-0.5">
-            <Map size={12} /> {t.home.quickActions.map} <ChevronRight size={13} />
+          <button onClick={() => navigate('/explore')} className="text-primary text-xs font-bold flex items-center gap-0.5">
+            {t.home.all} <ChevronRight size={13} />
           </button>
         </div>
         <div className="flex gap-3 px-5 overflow-x-auto pb-1">
-          {nearbyBarbers.map((b, i) => (
+          {availableBarbers.map((b, i) => (
             <motion.div
               key={b.id}
               initial={{ opacity: 0, x: 20 }}
@@ -259,9 +256,8 @@ export default function HomePage() {
       <div>
         <div className="flex items-center justify-between px-5 mb-3">
           <div className="flex items-center gap-2">
-            <Sparkles size={14} className="text-primary" />
+            <Star size={14} className="text-primary" />
             <h2 className="text-base font-black text-foreground">{t.home.topRated}</h2>
-            <span className="text-[10px] bg-primary/15 text-primary px-2 py-0.5 rounded-full font-medium">{t.home.aiPick}</span>
           </div>
           <button onClick={() => navigate('/explore')} className="text-primary text-xs font-bold flex items-center gap-0.5">
             {t.home.all} <ChevronRight size={13} />
@@ -294,16 +290,10 @@ export default function HomePage() {
             <Trophy size={16} className="text-yellow-400" />
             <span className="text-xs font-bold text-yellow-300 uppercase tracking-wider">{t.home.loyaltyPoints}</span>
           </div>
-          <span className="text-xs text-purple-300 font-medium">{t.home.goldMember}</span>
         </div>
         <div className="flex items-end justify-between mb-2">
-          <p className="text-2xl font-black text-white">{loyaltyPoints}</p>
-          <p className="text-xs text-purple-300 mb-0.5">{Math.max(0, nextRewardAt - loyaltyPoints)} {t.home.pointsToNext}</p>
-        </div>
-        <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-          <motion.div initial={{ width: 0 }} animate={{ width: `${loyaltyProgress}%` }}
-            transition={{ delay: 0.4, duration: 0.8 }}
-            className="h-full rounded-full bg-gradient-to-r from-yellow-400 to-yellow-500" />
+          <p className="text-2xl font-black text-white">{loyaltyPoints ?? '—'}</p>
+          <p className="text-xs text-purple-300 mb-0.5">{loyaltyPoints == null ? (ar ? 'تعذّر تحميل الرصيد' : 'Balance unavailable') : (ar ? 'الرصيد المسجل في حسابك' : 'Balance recorded in your account')}</p>
         </div>
       </motion.div>
 
@@ -357,11 +347,10 @@ export default function HomePage() {
 
       <button
         onClick={() => navigate('/chat')}
-        aria-label="AI Barber Assistant"
+        aria-label={ar ? 'مساعد الحلاق وأسئلة الحجز' : 'Barber and booking help'}
         className="fixed bottom-24 right-5 z-40 w-14 h-14 rounded-2xl bg-gold-gradient shadow-gold flex items-center justify-center active:scale-95 transition-transform"
       >
-        <Sparkles size={22} className="text-primary-foreground" />
-        <span className="absolute -top-1 -right-1 w-3 h-3 bg-accent rounded-full animate-pulse ring-2 ring-background" />
+        <MessageCircle size={22} className="text-primary-foreground" />
       </button>
     </div>
   );

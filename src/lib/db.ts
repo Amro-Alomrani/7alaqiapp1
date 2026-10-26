@@ -37,7 +37,7 @@ export async function createBarberProfile(uid: string, data: Partial<BarberDoc>)
     ownerUid: uid,
     name: data.name || 'New Barber',
     shopName: data.shopName || 'My Shop',
-    avatar: data.avatar || `https://i.pravatar.cc/150?u=${uid}`,
+    avatar: data.avatar || '/logo.png',
     coverImage: data.coverImage || '',
     rating: 0,
     reviewCount: 0,
@@ -46,13 +46,13 @@ export async function createBarberProfile(uid: string, data: Partial<BarberDoc>)
     services: data.services || [],
     specialties: data.specialties || [],
     queueCount: 0,
-    available: true,
+    available: false,
     featured: false,
     address: data.address || '',
     description: data.description || '',
     trustScore: 80,
     avgDuration: 30,
-    liveStatus: 'available',
+    liveStatus: 'closed',
     followers: 0,
     gallery: [],
     createdAt: now,
@@ -61,6 +61,8 @@ export async function createBarberProfile(uid: string, data: Partial<BarberDoc>)
     occupiedChairs: 0,
     isOnboarded: false,
     staffIds: [],
+    offersHomeService: false,
+    homeServiceFee: 0,
   };
   await setDoc(ref, { ...payload, _ts: serverTimestamp() }, { merge: true });
   return { id: uid, ...payload };
@@ -84,18 +86,23 @@ export async function listBarbers(): Promise<Barber[]> {
   return snap.docs.map(d => ({ id: d.id, ...d.data() } as Barber));
 }
 
-export function subscribeBarbers(cb: (barbers: Barber[]) => void) {
+export function subscribeBarbers(
+  cb: (barbers: Barber[]) => void,
+  onError?: (error: Error) => void,
+) {
   let unsub: (() => void) | null = null;
+  let cancelled = false;
   (async () => {
     try {
       const { db, collection, onSnapshot } = await fs();
+      if (cancelled) return;
       unsub = onSnapshot(collection(db, COL.barbers),
         snap => {
           const all = snap.docs.map(d => ({ id: d.id, ...d.data() } as Barber));
           const real = all
             .filter(b =>
-              b.isLive === true &&
-              b.onboardingComplete === true &&
+              b.isLive !== false &&
+              (b.onboardingComplete === true || b.isOnboarded === true) &&
               b.name && b.name.trim().length > 0 &&
               b.shopName && b.shopName.trim().length > 0
             )
@@ -103,14 +110,17 @@ export function subscribeBarbers(cb: (barbers: Barber[]) => void) {
             .slice(0, 100);
           cb(real);
         },
-        err => {
-cb([]); }
+        err => onError?.(err)
       );
+      if (cancelled) unsub();
     } catch (e) {
-cb([]);
+      if (!cancelled) onError?.(e instanceof Error ? e : new Error(String(e)));
     }
   })();
-  return () => { if (unsub) unsub(); };
+  return () => {
+    cancelled = true;
+    if (unsub) unsub();
+  };
 }
 
 export interface PostDoc extends Omit<Post, 'id' | 'timeAgo' | 'isFollowing'> {
@@ -203,6 +213,8 @@ export interface BookingDoc {
   status: 'requested' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'rejected';
   totalPrice: number;
   tip?: number;
+  homeServiceFee?: number;
+  homeService?: boolean;
   payMethod?: 'cash' | 'wallet';
   pointsEarned: number;
   notes?: string;
@@ -229,8 +241,8 @@ export async function createBooking(
   }
   void pushNotification(data.barberId, {
     type: 'booking_request',
-    title: 'ًں“¥ ط·ظ„ط¨ ط­ط¬ط² ط¬ط¯ظٹط¯',
-    body: `${data.customerName} ط­ط¬ط² ${data.service?.name || 'ط®ط¯ظ…ط©'} â€” ${data.date} ط§ظ„ط³ط§ط¹ط© ${data.time}`,
+    title: 'طلب حجز جديد',
+    body: `${data.customerName} حجز ${data.service?.name || 'خدمة'} — ${data.date} الساعة ${data.time}`,
     bookingId: id,
     fromUid: data.customerUid,
     fromName: data.customerName,
@@ -249,68 +261,79 @@ export async function updateCustomerLocation(bookingId: string, lat: number, lng
   });
 }
 
+export interface LiveBarberLocation {
+  lat: number;
+  lng: number;
+  heading?: number | null;
+  speed?: number | null;
+  updatedAt: number;
+}
+
+export async function updateBarberLiveLocation(uid: string, location: Omit<LiveBarberLocation, 'updatedAt'> | null) {
+  const { db, doc, updateDoc, deleteField } = await fs();
+  const patch = location
+    ? { liveLocation: { ...location, updatedAt: Date.now() }, liveLocationUpdatedAt: Date.now() }
+    : { liveLocation: deleteField(), liveLocationUpdatedAt: deleteField() };
+  await updateDoc(doc(db, COL.barbers, uid), patch);
+}
+
+export function subscribeBarberLiveLocation(uid: string, cb: (location: LiveBarberLocation | null) => void) {
+  let unsub: (() => void) | null = null;
+  let cancelled = false;
+  (async () => {
+    try {
+      const { db, doc, onSnapshot } = await fs();
+      if (cancelled) return;
+      unsub = onSnapshot(doc(db, COL.barbers, uid), snap => {
+        const data = snap.exists() ? snap.data().liveLocation as LiveBarberLocation | undefined : undefined;
+        cb(data && Number.isFinite(data.lat) && Number.isFinite(data.lng) ? data : null);
+      }, () => cb(null));
+    } catch { cb(null); }
+  })();
+  return () => { cancelled = true; if (unsub) unsub(); };
+}
+
 export async function updateBookingStatus(bookingId: string, status: BookingDoc['status']) {
-  const { db, doc, updateDoc, getDoc, increment } = await fs();
+  const { db, doc, updateDoc, getDoc } = await fs();
   const ref = doc(db, COL.bookings, bookingId);
   await updateDoc(ref, { status, updatedAt: Date.now() });
   try {
     const snap = await getDoc(ref);
     if (snap.exists()) {
       const b = snap.data() as BookingDoc;
-      if (status === 'completed' && b.customerUid) {
-        const userRef = doc(db, COL.users, b.customerUid);
-        await updateDoc(userRef, {
-          loyaltyPoints: increment(30),
-          totalBookings: increment(1),
-        }).catch(() => {});
-      }
-      
-      if (status === 'in_progress') {
-        const barberRef = doc(db, COL.barbers, b.barberId);
-        await updateDoc(barberRef, { occupiedChairs: increment(1) }).catch(() => {});
-      } else if (['completed', 'cancelled', 'rejected'].includes(status)) {
-        const barberRef = doc(db, COL.barbers, b.barberId);
-        const barberSnap = await getDoc(barberRef);
-        if (barberSnap.exists()) {
-          const barberData = barberSnap.data();
-          if (barberData.occupiedChairs > 0) {
-            await updateDoc(barberRef, { occupiedChairs: increment(-1) }).catch(() => {});
-          }
-        }
-      }
-    }
-  } catch { /* */ }
-  try {
-    const snap = await getDoc(ref);
-    if (snap.exists()) {
-      const b = snap.data() as BookingDoc;
       const titles: Record<BookingDoc['status'], string> = {
-        requested: 'ًں“¥ Booking received',
-        confirmed: 'âœ… Booking accepted',
-        in_progress: 'âœ‚ï¸ڈ Your appointment started',
-        completed: 'ًںژ‰ Appointment complete',
-        cancelled: 'â‌Œ Booking cancelled',
-        rejected: 'ًںک” Booking rejected',
+        requested: 'Booking received',
+        confirmed: 'Booking accepted',
+        in_progress: 'Your appointment has started',
+        completed: 'Appointment complete',
+        cancelled: 'Booking cancelled',
+        rejected: 'Booking rejected',
       };
-      await pushNotification(b.customerUid, {
-        type: 'booking_update',
-        title: titles[status] || 'Booking update',
-        body: `${b.barberName} آ· ${b.service?.name || ''}`,
-        bookingId,
-        fromUid: b.barberId,
-        fromName: b.barberName,
-        fromAvatar: b.barberAvatar || '',
-      });
+      // A customer cancelling their own request is already viewing the status;
+      // don't create a self-notification that Firestore rules correctly reject.
+      if (status !== 'cancelled') {
+        await pushNotification(b.customerUid, {
+          type: 'booking_update',
+          title: titles[status] || 'Booking update',
+          body: `${b.barberName} · ${b.service?.name || ''}`,
+          bookingId,
+          fromUid: b.barberId,
+          fromName: b.barberName,
+          fromAvatar: b.barberAvatar || '',
+        });
+      }
     }
   } catch { /* */ }
 }
 
 export function subscribeCustomerBookings(customerUid: string, cb: (bookings: (BookingDoc & { id: string })[]) => void) {
   let unsub: (() => void) | null = null;
+  let cancelled = false;
   (async () => {
     try {
       if (!customerUid) { cb([]); return; }
       const { db, collection, onSnapshot, query, where } = await fs();
+      if (cancelled) return;
       const q = query(collection(db, COL.bookings), where('customerUid', '==', customerUid));
       unsub = onSnapshot(q,
         snap => {
@@ -318,22 +341,23 @@ export function subscribeCustomerBookings(customerUid: string, cb: (bookings: (B
           items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
           cb(items);
         },
-        err => {
-cb([]); }
+        () => { if (!cancelled) cb([]); }
       );
-    } catch (e) {
-cb([]);
+    } catch {
+      if (!cancelled) cb([]);
     }
   })();
-  return () => { if (unsub) unsub(); };
+  return () => { cancelled = true; if (unsub) unsub(); };
 }
 
 export function subscribeBarberBookings(barberId: string, cb: (bookings: (BookingDoc & { id: string })[]) => void) {
   let unsub: (() => void) | null = null;
+  let cancelled = false;
   (async () => {
     try {
       if (!barberId) { cb([]); return; }
       const { db, collection, onSnapshot, query, where } = await fs();
+      if (cancelled) return;
       const q = query(collection(db, COL.bookings), where('barberId', '==', barberId));
       unsub = onSnapshot(q,
         snap => {
@@ -341,38 +365,31 @@ export function subscribeBarberBookings(barberId: string, cb: (bookings: (Bookin
           items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
           cb(items);
         },
-        err => {
-cb([]); }
+        () => { if (!cancelled) cb([]); }
       );
-    } catch (e) {
-cb([]);
+    } catch {
+      if (!cancelled) cb([]);
     }
   })();
-  return () => { if (unsub) unsub(); };
+  return () => { cancelled = true; if (unsub) unsub(); };
 }
 
 export interface ReviewDoc extends Omit<Review, 'id'> {
+  bookingId: string;
   barberId: string;
   customerUid: string;
   createdAt: number;
 }
 
-export async function addReview(barberId: string, customerUid: string, data: Omit<ReviewDoc, 'barberId' | 'customerUid' | 'createdAt'>) {
-  const { db, collection, addDoc, doc, getDoc, updateDoc } = await fs();
-  await addDoc(collection(db, COL.reviews), {
+export async function addReview(barberId: string, customerUid: string, bookingId: string, data: Omit<ReviewDoc, 'bookingId' | 'barberId' | 'customerUid' | 'createdAt'>) {
+  const { db, doc, setDoc } = await fs();
+  await setDoc(doc(db, COL.reviews, bookingId), {
     ...data,
+    bookingId,
     barberId,
     customerUid,
     createdAt: Date.now(),
   });
-  const barberRef = doc(db, COL.barbers, barberId);
-  const barberSnap = await getDoc(barberRef);
-  if (barberSnap.exists()) {
-    const b = barberSnap.data() as BarberDoc;
-    const newCount = (b.reviewCount || 0) + 1;
-    const newRating = ((b.rating || 0) * (b.reviewCount || 0) + data.rating) / newCount;
-    await updateDoc(barberRef, { rating: Math.round(newRating * 10) / 10, reviewCount: newCount });
-  }
 }
 
 export function subscribeBarberReviews(barberId: string, cb: (reviews: (ReviewDoc & { id: string })[]) => void) {
@@ -413,13 +430,18 @@ export function generateReferralCode(name: string, uid: string): string {
 }
 
 export async function upsertUser(uid: string, data: Partial<UserDoc>) {
-  const { db, doc, setDoc } = await fs();
-  const referralCode = data.referralCode || generateReferralCode(data.name || 'USER', uid);
-  await setDoc(doc(db, COL.users, uid), {
+  const { db, doc, setDoc, getDoc } = await fs();
+  const userRef = doc(db, COL.users, uid);
+  const existing = await getDoc(userRef);
+  const referralCode = data.referralCode || (existing.exists() ? existing.data().referralCode : undefined) || generateReferralCode(data.name || 'USER', uid);
+  const createdAt = existing.exists()
+    ? existing.data().createdAt || data.createdAt || Date.now()
+    : data.createdAt || Date.now();
+  await setDoc(userRef, {
     uid,
     ...data,
     referralCode,
-    createdAt: data.createdAt || Date.now(),
+    createdAt,
   }, { merge: true });
 }
 
@@ -442,47 +464,13 @@ export async function getUserByReferralCode(code: string): Promise<UserDoc | nul
  * Process referral on new user signup.
  * Awards 100 points to inviter, 50 points welcome to new user.
  */
-export async function processReferralSignup(
-  newUserUid: string,
-  newUserName: string,
-  referralCode: string,
-) {
-  try {
-    const { db, doc, setDoc, increment, collection, addDoc } = await fs();
-    const inviter = await getUserByReferralCode(referralCode);
-    if (!inviter || inviter.uid === newUserUid) return false;
-
-    await setDoc(doc(db, COL.users, inviter.uid), {
-      loyaltyPoints: increment(100),
-      referralCount: increment(1),
-    }, { merge: true });
-
-    await setDoc(doc(db, COL.users, newUserUid), {
-      loyaltyPoints: increment(50),
-      referredBy: inviter.uid,
-    }, { merge: true });
-
-    await addDoc(collection(db, COL.referrals), {
-      inviterUid: inviter.uid,
-      inviterName: inviter.name || '',
-      newUserUid,
-      newUserName,
-      pointsAwarded: 100,
-      createdAt: Date.now(),
-    });
-
-    await pushNotification(inviter.uid, {
-      type: 'promo',
-      title: 'ًںژ‰ طھظ…طھ ط§ظ„ط¯ط¹ظˆط© ط¨ظ†ط¬ط§ط­!',
-      body: `${newUserName} ط§ظ†ط¶ظ… ط¨ط§ط³طھط®ط¯ط§ظ… ظƒظˆط¯ظƒ â€” ط±ط¨ط­طھ 100 ظ†ظ‚ط·ط©!`,
-      fromUid: newUserUid,
-      fromName: newUserName,
-    });
-
-    return true;
-  } catch (e) {
-return false;
-  }
+export async function processReferralSignup(referralCode: string) {
+  const { getFunctionsLazy } = await import('./firebase');
+  const functions = await getFunctionsLazy();
+  const { httpsCallable } = await import('firebase/functions');
+  const callable = httpsCallable<{ referralCode: string }, { status: 'awarded' | 'already_processed' | 'invalid' }>(functions, 'processReferralSignup');
+  const result = await callable({ referralCode: referralCode.trim().toUpperCase() });
+  return result.data.status;
 }
 
 export interface CheckinDoc {
@@ -504,49 +492,29 @@ export interface CheckinDoc {
  */
 export async function recordCheckin(
   customerUid: string,
-  customerName: string,
+  _customerName: string,
   barberId: string,
-  coords?: { lat: number; lng: number },
-): Promise<{ success: boolean; message: string; points: number }> {
+  coords: { lat: number; lng: number; accuracy: number },
+): Promise<{ success: boolean; message: string; points: number; barberName: string }> {
   try {
-    const { db, doc, getDoc, setDoc, updateDoc, increment } = await fs();
-
-    const barber = await getBarber(barberId);
-    if (!barber) return { success: false, message: 'Barber not found', points: 0 };
-
-    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    const dailyId = `${customerUid}_${barberId}_${today}`;
-    const checkinRef = doc(db, COL.checkins, dailyId);
-    const existing = await getDoc(checkinRef);
-    if (existing.exists()) {
-      return { success: false, message: 'Already checked in today', points: 0 };
+    if (!customerUid || !barberId || !coords) {
+      return { success: false, message: 'Sign in and allow location access to check in.', points: 0, barberName: '' };
     }
-
-    const points = 20;
-    await setDoc(checkinRef, {
-      customerUid,
-      customerName,
-      barberId,
-      barberName: barber.name || barber.shopName || '',
-      lat: coords?.lat ?? null,
-      lng: coords?.lng ?? null,
-      pointsAwarded: points,
-      createdAt: Date.now(),
-    } as CheckinDoc);
-
-    await setDoc(doc(db, COL.users, customerUid), { loyaltyPoints: increment(points) }, { merge: true });
-
-    void pushNotification(barberId, {
-      type: 'promo',
-      title: 'ًں“² ط²ظٹط§ط±ط© ط¬ط¯ظٹط¯ط©!',
-      body: `${customerName} ط²ط§ط± طµط§ظ„ظˆظ†ظƒ ظˆط³ط¬ظ‘ظ„ ط­ط¶ظˆط±ظ‡`,
-      fromUid: customerUid,
-      fromName: customerName,
-    });
-
-    return { success: true, message: 'Checked in successfully', points };
-  } catch (e) {
-return { success: false, message: 'Check-in failed', points: 0 };
+    const { getFunctionsLazy } = await import('./firebase');
+    const { httpsCallable } = await import('firebase/functions');
+    const functions = await getFunctionsLazy();
+    const checkin = httpsCallable<
+      { barberId: string; lat: number; lng: number; accuracy: number },
+      { status: 'recorded' | 'already_checked_in'; points: number; barberName: string }
+    >(functions, 'recordCheckin');
+    const result = (await checkin({ barberId, lat: coords.lat, lng: coords.lng, accuracy: coords.accuracy })).data;
+    if (result.status === 'already_checked_in') {
+      return { success: false, message: 'Already checked in today', points: 0, barberName: result.barberName };
+    }
+    return { success: true, message: 'Checked in successfully', points: result.points, barberName: result.barberName };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Check-in failed';
+    return { success: false, message, points: 0, barberName: '' };
   }
 }
 
@@ -599,7 +567,7 @@ export interface FollowDoc {
 }
 
 export async function followBarber(followerUid: string, barber: { id: string; name?: string; avatar?: string }) {
-  const { db, doc, setDoc, updateDoc, increment } = await fs();
+  const { db, doc, setDoc } = await fs();
   const id = `${followerUid}__${barber.id}`;
   await setDoc(doc(db, COL.follows, id), {
     followerUid,
@@ -608,14 +576,12 @@ export async function followBarber(followerUid: string, barber: { id: string; na
     barberAvatar: barber.avatar || '',
     createdAt: Date.now(),
   });
-  try { await updateDoc(doc(db, COL.barbers, barber.id), { followers: increment(1) }); } catch {  }
 }
 
 export async function unfollowBarber(followerUid: string, barberId: string) {
-  const { db, doc, deleteDoc, updateDoc, increment } = await fs();
+  const { db, doc, deleteDoc } = await fs();
   const id = `${followerUid}__${barberId}`;
   await deleteDoc(doc(db, COL.follows, id));
-  try { await updateDoc(doc(db, COL.barbers, barberId), { followers: increment(-1) }); } catch {  }
 }
 
 export async function isFollowing(followerUid: string, barberId: string): Promise<boolean> {
@@ -667,7 +633,7 @@ export async function pushNotification(
   toUid: string,
   data: Omit<NotificationDoc, 'toUid' | 'read' | 'createdAt'>
 ) {
-  if (!toUid) return;
+  if (!toUid) return false;
   try {
     const { db, collection, addDoc } = await fs();
     await addDoc(collection(db, COL.notifications), {
@@ -676,7 +642,10 @@ export async function pushNotification(
       read: false,
       createdAt: Date.now(),
     });
-  } catch { /* */ }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function subscribeNotifications(
@@ -684,10 +653,12 @@ export function subscribeNotifications(
   cb: (items: (NotificationDoc & { id: string })[]) => void
 ) {
   let unsub: (() => void) | null = null;
+  let cancelled = false;
   (async () => {
     try {
       if (!toUid) { cb([]); return; }
       const { db, collection, onSnapshot, query, where } = await fs();
+      if (cancelled) return;
       const q = query(collection(db, COL.notifications), where('toUid', '==', toUid));
       unsub = onSnapshot(q,
         snap => {
@@ -695,13 +666,13 @@ export function subscribeNotifications(
           items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
           cb(items.slice(0, 50));
         },
-        err => {
-cb([]); }
+        () => { if (!cancelled) cb([]); }
       );
-    } catch (e) {
-cb([]); }
+    } catch {
+      if (!cancelled) cb([]);
+    }
   })();
-  return () => { if (unsub) unsub(); };
+  return () => { cancelled = true; if (unsub) unsub(); };
 }
 
 export async function markNotificationRead(id: string) {

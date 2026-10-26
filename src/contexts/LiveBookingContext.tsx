@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, ReactNode } from 'react';
 import { LiveBooking, LiveBookingStatus, Service } from '@/types';
 import { eventBus, cancelBookingTimers } from '@/lib/realtime';
 import { useAuth } from '@/contexts/AuthContext';
@@ -10,14 +10,14 @@ interface LiveBookingContextType {
   activeBooking: LiveBooking | null;
   bookingHistory: LiveBooking[];
   allBookings: LiveBooking[];
-  createBooking: (barberId: string, salonId: string, service: Service, date: string, time: string, tip?: number, payMethod?: 'cash' | 'wallet', customerLocation?: { lat: number; lng: number }, presetId?: string) => LiveBooking;
-  cancelBooking: (id: string) => void;
+  createBooking: (barberId: string, salonId: string, service: Service, date: string, time: string, tip?: number, payMethod?: 'cash' | 'wallet', customerLocation?: { lat: number; lng: number }, presetId?: string, homeServiceFee?: number, homeService?: boolean) => LiveBooking;
+  cancelBooking: (id: string) => Promise<boolean>;
   rateBooking: (id: string, rating: number, review?: string) => void;
   getActiveBooking: () => LiveBooking | null;
-  acceptBooking: (id: string) => void;
-  rejectBooking: (id: string) => void;
-  startBooking: (id: string) => void;
-  completeBooking: (id: string) => void;
+  acceptBooking: (id: string) => Promise<boolean>;
+  rejectBooking: (id: string) => Promise<boolean>;
+  startBooking: (id: string) => Promise<boolean>;
+  completeBooking: (id: string) => Promise<boolean>;
   getBarberBookings: (barberId: string) => LiveBooking[];
 }
 
@@ -75,9 +75,11 @@ function patchStatus(b: LiveBooking, status: LiveBookingStatus): LiveBooking {
 export function LiveBookingProvider({ children }: { children: ReactNode }) {
   const [bookings, setBookings] = useState<LiveBooking[]>(() => loadBookings());
   const { customer, barberUser } = useAuth();
+  const currentUid = barberUser?.uid || customer?.uid;
   const allBarbers = useBarbers();
   const bookingsRef = useRef(bookings);
   const reminderTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const pendingTransitions = useRef<Set<string>>(new Set());
 
   useEffect(() => { bookingsRef.current = bookings; }, [bookings]);
 
@@ -101,6 +103,12 @@ export function LiveBookingProvider({ children }: { children: ReactNode }) {
       barberShop: d.barberShop,
       barberAvatar: d.barberAvatar || '',
       salonId: '',
+      salonLocation: (() => {
+        const barber = allBarbers.find(item => item.id === d.barberId);
+        return typeof barber?.lat === 'number' && typeof barber?.lng === 'number'
+          ? { lat: barber.lat, lng: barber.lng }
+          : undefined;
+      })(),
       staffId: d.staffId,
       staffName: d.staffName,
       staffAvatar: d.staffAvatar,
@@ -113,14 +121,18 @@ export function LiveBookingProvider({ children }: { children: ReactNode }) {
       queuePosition: 1,
       totalPrice: d.totalPrice,
       tip: d.tip ?? 0,
+      homeServiceFee: d.homeServiceFee ?? 0,
+      homeService: d.homeService === true,
       payMethod: d.payMethod || 'cash',
       customerLocation: d.customerLocation,
+      customerLocationUpdatedAt: d.customerLocationUpdatedAt,
     };
-  }, []);
+  }, [allBarbers]);
 
   const mergeFs = useCallback((incoming: (BookingDoc & { id: string })[]) => {
     setBookings(prev => {
-      const map = new Map(prev.map(b => [b.id, b]));
+      const scoped = prev.filter(b => currentUid && (b.customerId === currentUid || b.barberId === currentUid));
+      const map = new Map(scoped.map(b => [b.id, b]));
       incoming.forEach(d => {
         const live = mapFsToLive(d);
         const existing = map.get(d.id);
@@ -131,7 +143,7 @@ export function LiveBookingProvider({ children }: { children: ReactNode }) {
       });
       return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
     });
-  }, [mapFsToLive]);
+  }, [currentUid, mapFsToLive]);
 
   useEffect(() => {
     if (!customer?.uid) return;
@@ -145,11 +157,20 @@ export function LiveBookingProvider({ children }: { children: ReactNode }) {
     return () => unsub();
   }, [barberUser?.uid, mergeFs]);
 
-  const activeBooking = bookings.find(b =>
+  const visibleBookings = useMemo(
+    () => currentUid ? bookings.filter(b => b.customerId === currentUid || b.barberId === currentUid) : [],
+    [bookings, currentUid],
+  );
+  const activeBooking = visibleBookings.find(b =>
     !['completed', 'cancelled', 'rejected'].includes(b.status)
   ) || null;
 
-  useEffect(() => { saveBookings(bookings); }, [bookings]);
+  useEffect(() => { saveBookings(visibleBookings); }, [visibleBookings]);
+
+  useEffect(() => {
+    for (const timer of reminderTimers.current.values()) clearTimeout(timer);
+    reminderTimers.current.clear();
+  }, [currentUid]);
 
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
@@ -183,7 +204,9 @@ export function LiveBookingProvider({ children }: { children: ReactNode }) {
     tip = 0,
     payMethod: 'cash' | 'wallet' = 'cash',
     customerLocation?: { lat: number; lng: number },
-    presetId?: string
+    presetId?: string,
+    homeServiceFee = 0,
+    homeService = false,
   ): LiveBooking => {
     const barber = allBarbers.find(b => b.id === barberId);
     const id = presetId || `bk_${Date.now()}`;
@@ -206,10 +229,12 @@ export function LiveBookingProvider({ children }: { children: ReactNode }) {
       createdAt: Date.now(),
       estimatedWait: (barber?.queueCount || 0) * (barber?.avgDuration || 30) + (service.duration || 30),
       queuePosition: (barber?.queueCount || 0) + 1,
-      totalPrice: service.price + tip,
+      totalPrice: service.price + tip + homeServiceFee,
       tip,
+      homeServiceFee,
+      homeService,
       payMethod,
-      salonLocation: barber?.lat && barber?.lng ? { lat: barber.lat, lng: barber.lng } : undefined,
+      salonLocation: typeof barber?.lat === 'number' && typeof barber?.lng === 'number' ? { lat: barber.lat, lng: barber.lng } : undefined,
       customerLocation,
     };
 
@@ -260,10 +285,12 @@ export function LiveBookingProvider({ children }: { children: ReactNode }) {
           service,
           date,
           time,
-          totalPrice: service.price + tip,
+          totalPrice: service.price + tip + homeServiceFee,
           tip,
+          homeServiceFee,
+          homeService,
           payMethod,
-          pointsEarned: Math.round((service.price + tip) * 3),
+          pointsEarned: 0,
         }, id).catch(() => {})
       );
     }
@@ -276,51 +303,73 @@ export function LiveBookingProvider({ children }: { children: ReactNode }) {
     if (t) { clearTimeout(t); reminderTimers.current.delete(id); }
   };
 
-  const cancelBooking = useCallback((id: string) => {
+  const runStatusTransition = useCallback(async (
+    id: string,
+    allowed: LiveBookingStatus[],
+    status: LiveBookingStatus,
+    firestoreStatus: BookingDoc['status'],
+  ): Promise<boolean> => {
+    const booking = bookingsRef.current.find(b => b.id === id);
+    if (!booking || !allowed.includes(booking.status) || pendingTransitions.current.has(id)) return false;
+    pendingTransitions.current.add(id);
+    try {
+      await updateBookingStatus(id, firestoreStatus);
+      setBookings(prev => prev.map(b => b.id === id ? patchStatus(b, status) : b));
+      return true;
+    } catch {
+      return false;
+    } finally {
+      pendingTransitions.current.delete(id);
+    }
+  }, []);
+
+  const cancelBooking = useCallback(async (id: string) => {
+    const changed = await runStatusTransition(id, ['requested', 'accepted'], 'cancelled', 'cancelled');
+    if (!changed) return false;
     clearReminderTimer(id);
     cancelBookingTimers(id);
-    setBookings(prev => prev.map(b => b.id === id ? { ...b, status: 'cancelled' as const } : b));
-    void updateBookingStatus(id, 'cancelled').catch(() => {});
-  }, []);
+    return true;
+  }, [runStatusTransition]);
 
   const rateBooking = useCallback((id: string, rating: number, review?: string) => {
     setBookings(prev => prev.map(b => b.id === id ? { ...b, rating, review } : b));
   }, []);
 
-  const acceptBooking = useCallback((id: string) => {
-    clearReminderTimer(id);
-    setBookings(prev => prev.map(b => b.id === id && b.status === 'requested' ? patchStatus(b, 'accepted') : b));
-    void updateBookingStatus(id, 'confirmed').catch(() => {});
-  }, []);
+  const acceptBooking = useCallback(async (id: string) => {
+    const changed = await runStatusTransition(id, ['requested'], 'accepted', 'confirmed');
+    if (changed) clearReminderTimer(id);
+    return changed;
+  }, [runStatusTransition]);
 
-  const rejectBooking = useCallback((id: string) => {
-    clearReminderTimer(id);
-    cancelBookingTimers(id);
-    setBookings(prev => prev.map(b => b.id === id ? { ...b, status: 'rejected' as const } : b));
-    void updateBookingStatus(id, 'rejected').catch(() => {});
-  }, []);
+  const rejectBooking = useCallback(async (id: string) => {
+    const changed = await runStatusTransition(id, ['requested'], 'rejected', 'rejected');
+    if (changed) {
+      clearReminderTimer(id);
+      cancelBookingTimers(id);
+    }
+    return changed;
+  }, [runStatusTransition]);
 
-  const startBooking = useCallback((id: string) => {
-    setBookings(prev => prev.map(b => b.id === id ? patchStatus(b, 'in_progress') : b));
-    void updateBookingStatus(id, 'in_progress').catch(() => {});
-  }, []);
+  const startBooking = useCallback((id: string) =>
+    runStatusTransition(id, ['accepted', 'preparing', 'your_turn'], 'in_progress', 'in_progress'),
+  [runStatusTransition]);
 
-  const completeBooking = useCallback((id: string) => {
-    cancelBookingTimers(id);
-    setBookings(prev => prev.map(b => b.id === id ? patchStatus(b, 'completed') : b));
-    void updateBookingStatus(id, 'completed').catch(() => {});
-  }, []);
+  const completeBooking = useCallback(async (id: string) => {
+    const changed = await runStatusTransition(id, ['in_progress'], 'completed', 'completed');
+    if (changed) cancelBookingTimers(id);
+    return changed;
+  }, [runStatusTransition]);
 
   const getActiveBooking = useCallback(() => activeBooking, [activeBooking]);
   const getBarberBookings = useCallback((barberId: string) => {
-    return bookings.filter(b => b.barberId === barberId);
-  }, [bookings]);
+    return visibleBookings.filter(b => b.barberId === barberId);
+  }, [visibleBookings]);
 
   return (
     <LiveBookingContext.Provider value={{
       activeBooking,
-      bookingHistory: bookings,
-      allBookings: bookings,
+      bookingHistory: visibleBookings,
+      allBookings: visibleBookings,
       createBooking,
       cancelBooking,
       rateBooking,

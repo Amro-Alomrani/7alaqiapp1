@@ -40,7 +40,7 @@ export default function BookingSuccessPage() {
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
         <h1 className="text-2xl font-black text-foreground">
-          {ar ? 'تم تأكيد حجزك! 🎉' : 'Booking Confirmed! 🎉'}
+          {ar ? 'تم إرسال طلب الموعد 🎉' : 'Booking request sent 🎉'}
         </h1>
         <p className="text-muted-foreground mt-2">
           {ar ? 'تم إرسال طلب الحجز — انتظر موافقة الحلاق' : 'Booking request sent — waiting for barber confirmation'}

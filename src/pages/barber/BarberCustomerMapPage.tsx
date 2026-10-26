@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useSafeBack } from "@/hooks/useSafeBack";
 import { useNavigate, useParams } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Polyline, useMap } from 'react-leaflet';
+import MapTileLayer from '@/components/maps/MapTileLayer';
 import L from 'leaflet';
 import { ArrowLeft, Navigation, MessageCircle, Phone, Clock, MapPin, Bell } from 'lucide-react';
 import { useLiveBooking } from '@/contexts/LiveBookingContext';
@@ -55,6 +57,7 @@ function distanceKm(a: [number, number], b: [number, number]) {
 
 export default function BarberCustomerMapPage() {
   const navigate = useNavigate();
+  const safeBack = useSafeBack();
   const { bookingId } = useParams();
   const { allBookings, acceptBooking, startBooking, completeBooking } = useLiveBooking();
   const { barberUser } = useAuth();
@@ -62,11 +65,41 @@ export default function BarberCustomerMapPage() {
   const ar = language === 'ar';
   const booking = allBookings.find(b => b.id === bookingId);
   const [now, setNow] = useState(Date.now());
+  const [routePoints, setRoutePoints] = useState<[number, number][]>([]);
+  const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    const customer = booking?.customerLocation;
+    const salon = booking?.salonLocation;
+    if (!customer || !salon) { setRoutePoints([]); setEtaMinutes(null); return; }
+    let cancelled = false;
+    const from: [number, number] = [salon.lat, salon.lng];
+    const to: [number, number] = [customer.lat, customer.lng];
+    fetch(`https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`)
+      .then(response => response.json())
+      .then(data => {
+        if (cancelled) return;
+        const route = data.routes?.[0];
+        if (data.code === 'Ok' && route) {
+          setRoutePoints(route.geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]] as [number, number]));
+          setEtaMinutes(Math.max(1, Math.round(route.duration / 60)));
+        } else {
+          setRoutePoints([from, to]);
+          setEtaMinutes(Math.max(1, Math.round(distanceKm(from, to) / 25 * 60)));
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRoutePoints([from, to]);
+        setEtaMinutes(Math.max(1, Math.round(distanceKm(from, to) / 25 * 60)));
+      });
+    return () => { cancelled = true; };
+  }, [booking?.id, booking?.customerLocation?.lat, booking?.customerLocation?.lng, booking?.salonLocation?.lat, booking?.salonLocation?.lng]);
 
   useEffect(() => {
     if (!booking?.customerId) return;
@@ -103,25 +136,23 @@ export default function BarberCustomerMapPage() {
     );
   }
 
-  const salonPos: [number, number] = booking.salonLocation
+  const salonPos: [number, number] | null = booking.salonLocation
     ? [booking.salonLocation.lat, booking.salonLocation.lng]
-    : [31.9539, 35.9106];
+    : null;
   const customerPos: [number, number] | null = booking.customerLocation
     ? [booking.customerLocation.lat, booking.customerLocation.lng]
     : null;
 
-  const points: [number, number][] = customerPos ? [customerPos, salonPos] : [salonPos];
-  const distance = customerPos ? distanceKm(customerPos, salonPos).toFixed(2) : null;
+  const points: [number, number][] = customerPos && salonPos ? [customerPos, salonPos] : customerPos ? [customerPos] : salonPos ? [salonPos] : [];
+  const distance = customerPos && salonPos ? distanceKm(customerPos, salonPos).toFixed(1) : null;
 
   const bookedAtMs = booking.createdAt;
-  const minutesAgo = Math.max(0, Math.floor((now - bookedAtMs) / 60000));
-  const lastSeenLabel = minutesAgo < 60
-    ? `${minutesAgo}${ar ? ' دقيقة' : ' min ago'}`
-    : `${Math.floor(minutesAgo / 60)}${ar ? ' ساعة' : 'h ago'}`;
-
-  const routePoints: [number, number][] = customerPos
-    ? [customerPos, [(customerPos[0] + salonPos[0]) / 2 + 0.001, (customerPos[1] + salonPos[1]) / 2 - 0.001], salonPos]
-    : [];
+  const minutesAgo = booking.customerLocationUpdatedAt ? Math.max(0, Math.floor((now - booking.customerLocationUpdatedAt) / 60000)) : null;
+  const lastSeenLabel = minutesAgo === null
+    ? (ar ? 'موقع العميل غير متاح' : 'Customer location unavailable')
+    : minutesAgo < 60
+      ? `${minutesAgo}${ar ? ' دقيقة' : ' min ago'}`
+      : `${Math.floor(minutesAgo / 60)}${ar ? ' ساعة' : 'h ago'}`;
 
   const sendAlertToCustomer = () => {
     if (!booking.customerId) return;
@@ -140,7 +171,7 @@ export default function BarberCustomerMapPage() {
     <div className="min-h-screen flex flex-col relative" dir={ar ? 'rtl' : 'ltr'}>
       <div className="absolute top-0 left-0 right-0 z-[1000] px-4 pt-12 pb-3">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)}
+          <button onClick={() => safeBack()}
             className="w-10 h-10 bg-card/95 backdrop-blur-sm border border-border rounded-full flex items-center justify-center shadow-lg">
             <ArrowLeft size={18} className={ar ? 'rotate-180' : ''} />
           </button>
@@ -154,17 +185,17 @@ export default function BarberCustomerMapPage() {
       </div>
 
       <MapContainer
-        center={salonPos}
+        center={salonPos || customerPos || [31.9539, 35.9106]}
         zoom={13}
         className="flex-1 w-full"
         style={{ height: '60vh' }}
         zoomControl={false}
-        attributionControl={false}
+        attributionControl
       >
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="" />
+        <MapTileLayer />
         <FitBounds points={points} />
         {customerPos && <Marker position={customerPos} icon={customerIcon} />}
-        <Marker position={salonPos} icon={salonIcon} />
+        {salonPos && <Marker position={salonPos} icon={salonIcon} />}
         {routePoints.length > 1 && (
           <Polyline
             positions={routePoints}
@@ -188,11 +219,15 @@ export default function BarberCustomerMapPage() {
               </p>
             </div>
           </div>
+          <div className="text-center">
+            <p className="text-sm font-bold text-foreground">{etaMinutes !== null ? `${etaMinutes} ${ar ? 'دقيقة' : 'min'}` : '—'}</p>
+            <p className="text-xs text-muted-foreground">{ar ? 'وصول تقريبي' : 'Approx. ETA'}</p>
+          </div>
           <div className="text-right">
             <p className="text-sm font-bold text-foreground flex items-center gap-1 justify-end">
               <Clock size={12} /> {lastSeenLabel}
             </p>
-            <p className="text-xs text-muted-foreground">{ar ? 'منذ الحجز' : 'Since booking'}</p>
+            <p className="text-xs text-muted-foreground">{ar ? 'آخر تحديث للموقع' : 'Location updated'}</p>
           </div>
         </div>
 
@@ -244,8 +279,8 @@ export default function BarberCustomerMapPage() {
             {booking.status.replace('_', ' ')}
           </span>
           {customerPos && (
-            <span className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-blue-500/10 text-blue-400 flex items-center gap-1">
-              <MapPin size={10} /> {ar ? 'الموقع متاح' : 'Live location'}
+            <span className={`text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 ${minutesAgo !== null && minutesAgo < 2 ? 'bg-green-500/10 text-green-400' : 'bg-blue-500/10 text-blue-400'}`}>
+              <MapPin size={10} /> {minutesAgo !== null && minutesAgo < 2 ? (ar ? 'مباشر' : 'Live') : (ar ? 'آخر موقع معروف' : 'Last known location')}
             </span>
           )}
         </div>
@@ -269,7 +304,7 @@ export default function BarberCustomerMapPage() {
               {ar ? 'إنهاء الخدمة' : 'Complete'}
             </button>
           )}
-          {customerPos && (
+          {customerPos && salonPos && (
             <button
               onClick={() => {
                 const url = `https://www.google.com/maps/dir/${salonPos[0]},${salonPos[1]}/${customerPos[0]},${customerPos[1]}`;

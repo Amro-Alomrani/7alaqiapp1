@@ -103,13 +103,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Register once per authenticated session, including sessions restored from
+  // local storage after the app is reopened. Store only the native FCM token;
+  // browser push needs a separate VAPID/service-worker setup.
+  useEffect(() => {
+    const uid = customer?.uid || barberUser?.uid;
+    if (!authReady || !uid) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { requestFcmToken } = await import('@/lib/firebase');
+        const token = await requestFcmToken();
+        if (!token || cancelled) return;
+        const { updateBarberProfile, upsertUser } = await import('@/lib/db');
+        if (barberUser?.uid === uid) await updateBarberProfile(uid, { fcmToken: token });
+        else await upsertUser(uid, { fcmToken: token });
+      } catch {
+        // Push setup is optional and must not block login or app startup.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [authReady, customer?.uid, barberUser?.uid]);
+
   const loginCustomer = useCallback((_phone: string, name?: string, uid?: string) => {
     if (!uid) {
 return;
     }
     setBarberUser(null);
     localStorage.removeItem('barberco_barber');
-    const defaultAvatar = `https://i.pravatar.cc/150?u=${encodeURIComponent(_phone)}`;
+    const defaultAvatar = '/logo.png';
     const user: CustomerUser = {
       uid,
       name: name?.trim() || 'Customer',
@@ -119,16 +141,10 @@ return;
     setCustomer(user);
     localStorage.setItem('barberco_customer', JSON.stringify(user));
     void import('@/lib/db').then(async ({ upsertUser, getUser }) => {
-      let fcmToken: string | undefined;
-      try {
-        const { requestFcmToken } = await import('@/lib/firebase');
-        fcmToken = await requestFcmToken() || undefined;
-      } catch {}
-
       let savedAvatar: string | undefined;
       try {
         const existing = await getUser(uid);
-        if (existing?.avatar && !existing.avatar.includes('pravatar.cc')) {
+        if (existing?.avatar && existing.avatar !== '/logo.png') {
           savedAvatar = existing.avatar;
           setCustomer(prev => {
             if (!prev || prev.uid !== uid) return prev;
@@ -144,7 +160,6 @@ return;
         phone: user.phone,
         ...(savedAvatar ? {} : { avatar: defaultAvatar }),
         role: 'customer',
-        ...(fcmToken ? { fcmToken } : {}),
       }).catch(() => {});
     }).catch(() => {});
   }, []);
@@ -165,12 +180,6 @@ return;
     setBarberUser(user);
     localStorage.setItem('barberco_barber', JSON.stringify(user));
     void import('@/lib/db').then(async ({ getBarber, updateBarberProfile }) => {
-      let fcmToken: string | undefined;
-      try {
-        const { requestFcmToken } = await import('@/lib/firebase');
-        fcmToken = await requestFcmToken() || undefined;
-      } catch {}
-      if (fcmToken) await updateBarberProfile(uid, { fcmToken }).catch(() => {});
       if (!name || !shopName) {
         getBarber(uid).then(doc => {
           if (doc) {

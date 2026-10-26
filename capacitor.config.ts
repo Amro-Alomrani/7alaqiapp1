@@ -16,7 +16,7 @@ const config: CapacitorConfig = {
   },
   android: {
     backgroundColor: '#000000',
-    allowMixedContent: true,
+    allowMixedContent: false,
     captureInput: true,
     webContentsDebuggingEnabled: false,
     minWebViewVersion: 60,
@@ -41,6 +41,9 @@ const config: CapacitorConfig = {
       resize: 'body',
       style: 'DARK',
       resizeOnFullScreen: true,
+    },
+    PushNotifications: {
+      presentationOptions: ['badge', 'sound', 'banner', 'list'],
     },
   },
 };

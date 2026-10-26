@@ -4,25 +4,25 @@ import AppLogo from '@/components/AppLogo';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { BarChart, Bar, XAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useLiveBooking } from '@/contexts/LiveBookingContext';
 import { useBarber } from '@/contexts/DataContext';
 import BarberStatusControl from '@/components/barber/BarberStatusControl';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 export default function BarberDashboardPage() {
   const navigate = useNavigate();
   const { barberUser } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const { t, toggleLanguage, language } = useLanguage();
+  const { t, language } = useLanguage();
   const ar = language === 'ar';
   const { getBarberBookings, acceptBooking, rejectBooking, startBooking, completeBooking } = useLiveBooking();
   const [currentTab, setCurrentTab] = useState<'overview' | 'queue' | 'bookings'>('overview');
   const CURRENT_BARBER_ID = barberUser?.uid || 'b1';
   const myBarberDoc = useBarber(CURRENT_BARBER_ID);
+  const staff = myBarberDoc?.staff ?? [];
 
   const myBookings = getBarberBookings(CURRENT_BARBER_ID);
   const pendingCount = myBookings.filter(b => b.status === 'requested').length;
@@ -54,22 +54,13 @@ export default function BarberDashboardPage() {
 
   const current = myBookings.find(b => b.status === 'in_progress') || null;
   const waiting = myBookings.filter(b => b.status === 'accepted' || b.status === 'preparing' || b.status === 'your_turn').map((b, i) => ({ ...b, position: i + 1, waitTime: i * 15 }));
-
-  useEffect(() => {
-    if (!myBarberDoc?.id) return;
-    const realOccupied = myBookings.filter(b => b.status === 'in_progress').length;
-    if (myBarberDoc.occupiedChairs !== realOccupied) {
-      import('@/lib/db').then(({ updateBarberProfile }) => 
-        updateBarberProfile(myBarberDoc.id, { occupiedChairs: realOccupied } as any)
-      ).catch(() => {});
-    }
-  }, [myBookings, myBarberDoc?.id, myBarberDoc?.occupiedChairs]);
+  const maxWeeklyAmount = Math.max(0, ...weekData.map(day => day.amount));
 
   const handleNotify = useCallback(async (booking: typeof myBookings[0]) => {
     try {
       const { pushNotification } = await import('@/lib/db');
-      await pushNotification(booking.customerId, {
-        type: 'promo',
+      const sent = await pushNotification(booking.customerId, {
+        type: 'booking_update',
         title: '💈 ' + (ar ? 'رسالة من حلاقك' : 'Message from your barber'),
         body: ar
           ? `${barberUser?.shopName || 'الصالون'} يذكّرك بموعدك - ${booking.service?.name || ''}`
@@ -78,24 +69,27 @@ export default function BarberDashboardPage() {
         fromName: barberUser?.name || barberUser?.shopName,
         bookingId: booking.id,
       });
-      toast.success(ar ? '🔔 تم إرسال الإشعار' : '🔔 Notification sent');
+      if (sent) toast.success(ar ? '🔔 تم إرسال الإشعار' : '🔔 Notification sent');
+      else toast.error(ar ? 'تعذر إرسال الإشعار. تحقق من الاتصال.' : 'Could not send the notification. Check your connection.');
     } catch {
       toast.error(ar ? 'فشل الإرسال' : 'Failed to send');
     }
   }, [barberUser, ar]);
 
-  const handleAccept = (id: string) => {
-    acceptBooking(id);
-    toast.success(t.barberDash.acceptedToast);
+  const handleAccept = async (id: string) => {
+    if (await acceptBooking(id)) toast.success(t.barberDash.acceptedToast);
+    else toast.error(ar ? 'تعذر تحديث الحجز. تحقق من الاتصال وحاول مجدداً.' : 'Could not update the booking. Check your connection and try again.');
   };
-  const handleReject = (id: string) => {
-    rejectBooking(id);
-    toast(t.barberDash.rejectedToast);
+  const handleReject = async (id: string) => {
+    if (await rejectBooking(id)) toast.success(t.barberDash.rejectedToast);
+    else toast.error(ar ? 'تعذر تحديث الحجز. تحقق من الاتصال وحاول مجدداً.' : 'Could not update the booking. Check your connection and try again.');
   };
-  const handleStart = (id: string) => { startBooking(id); };
-  const handleComplete = (id: string) => {
-    completeBooking(id);
-    toast.success(t.barberDash.completedToast);
+  const handleStart = async (id: string) => {
+    if (!await startBooking(id)) toast.error(ar ? 'تعذر تحديث الحجز. تحقق من الاتصال وحاول مجدداً.' : 'Could not update the booking. Check your connection and try again.');
+  };
+  const handleComplete = async (id: string) => {
+    if (await completeBooking(id)) toast.success(t.barberDash.completedToast);
+    else toast.error(ar ? 'تعذر تحديث الحجز. تحقق من الاتصال وحاول مجدداً.' : 'Could not update the booking. Check your connection and try again.');
   };
 
   return (
@@ -167,7 +161,7 @@ export default function BarberDashboardPage() {
           <motion.div key="overview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="px-5 space-y-4">
             <BarberStatusControl
               barberId={CURRENT_BARBER_ID}
-              defaultStatus={myBarberDoc?.liveStatus || 'available'}
+              defaultStatus={myBarberDoc?.liveStatus || 'closed'}
             />
 
             <div className="bg-card border border-border rounded-2xl p-4">
@@ -217,7 +211,7 @@ export default function BarberDashboardPage() {
                   <span className="text-xs font-bold text-green-400 uppercase tracking-wider">{ar ? 'يُخدَم الآن' : 'Currently Serving'}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <img src={current.customerAvatar || `https://i.pravatar.cc/150?u=${current.customerId}`} alt="" className="w-12 h-12 rounded-xl object-cover" />
+                  <img src={current.customerAvatar || '/logo.png'} alt="" className="w-12 h-12 rounded-xl object-cover" />
                   <div className="flex-1">
                     <p className="font-bold text-foreground">{current.customerName || (ar ? 'عميل' : 'Customer')}</p>
                     <p className="text-xs text-muted-foreground">{current.service?.name}</p>
@@ -240,16 +234,23 @@ export default function BarberDashboardPage() {
                 </div>
                 <span className="text-xs text-muted-foreground">{weekData.reduce((s, d) => s + d.amount, 0)} JOD {ar ? 'إجمالي' : 'total'}</span>
               </div>
-              <ResponsiveContainer width="100%" height={120}>
-                <BarChart data={weekData}>
-                  <XAxis dataKey="day" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <Tooltip
-                    formatter={(value: any) => [`${Number(value) || 0} JOD`, ar ? 'أرباح' : 'Earned']}
-                    contentStyle={{ background: 'hsl(222 22% 11%)', border: '1px solid hsl(222 22% 18%)', borderRadius: '12px', fontSize: '12px' }}
-                  />
-                  <Bar dataKey="amount" fill="hsl(38 92% 52%)" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="flex h-[120px] items-end gap-2" role="img" aria-label={ar ? 'الأرباح اليومية لهذا الأسبوع' : 'Daily earnings this week'}>
+                {weekData.map(day => {
+                  const height = maxWeeklyAmount > 0 ? (day.amount / maxWeeklyAmount) * 100 : 0;
+                  return (
+                    <div key={day.day} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1">
+                      <div className="flex h-24 w-full items-end rounded-md bg-secondary/60">
+                        <div
+                          className="w-full rounded-t-md bg-primary transition-[height]"
+                          style={{ height: `${height}%`, minHeight: day.amount > 0 ? 3 : 0 }}
+                          title={`${day.day}: ${day.amount} JOD`}
+                        />
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">{day.day}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="bg-card border border-border rounded-2xl p-4">
@@ -279,7 +280,7 @@ export default function BarberDashboardPage() {
               </div>
             </div>
 
-            {(myBarberDoc as any)?.staff && (myBarberDoc as any).staff.length > 0 && (
+            {staff.length > 0 && (
               <div className="bg-card border border-border rounded-2xl p-4">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
@@ -288,12 +289,18 @@ export default function BarberDashboardPage() {
                   </div>
                 </div>
                 <div className="space-y-4">
-                  {((myBarberDoc as any).staff as any[]).map(s => {
+                  {staff.map(s => {
                     const staffBookings = myBookings.filter(b => b.status === 'completed' && b.staffId === s.id);
                     const revenue = staffBookings.reduce((sum, b) => sum + b.totalPrice, 0);
                     return (
                       <div key={s.id} className="flex items-center gap-3">
-                        <img src={s.avatar || `https://ui-avatars.com/api/?name=${s.name}`} className="w-10 h-10 rounded-xl object-cover" />
+                        {s.avatar ? (
+                          <img src={s.avatar} alt={s.name} className="w-10 h-10 rounded-xl object-cover" />
+                        ) : (
+                          <div aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary text-sm font-bold text-secondary-foreground">
+                            {s.name?.trim().slice(0, 1) || '?'}
+                          </div>
+                        )}
                         <div className="flex-1">
                           <p className="text-sm font-bold text-foreground">{s.name}</p>
                           <div className="h-1.5 w-full bg-secondary rounded-full mt-1 overflow-hidden">
@@ -363,7 +370,7 @@ export default function BarberDashboardPage() {
                   <span className="text-xs font-bold text-green-400 uppercase">{ar ? 'يُخدَم الآن' : 'In Service'}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <img src={current.customerAvatar || `https://i.pravatar.cc/150?u=${current.customerId}`} alt="" className="w-12 h-12 rounded-xl object-cover" />
+                  <img src={current.customerAvatar || '/logo.png'} alt="" className="w-12 h-12 rounded-xl object-cover" />
                   <div className="flex-1">
                     <p className="font-bold text-foreground">{current.customerName || (ar ? 'عميل' : 'Customer')}</p>
                     <p className="text-xs text-muted-foreground">{current.service?.name}</p>
@@ -392,7 +399,7 @@ export default function BarberDashboardPage() {
                   <div className="w-8 h-8 bg-primary/10 rounded-xl flex items-center justify-center">
                     <span className="text-sm font-black text-primary">#{q.position}</span>
                   </div>
-                  <img src={q.customerAvatar || `https://i.pravatar.cc/150?u=${q.customerId}`} alt="" className="w-10 h-10 rounded-xl object-cover" />
+                  <img src={q.customerAvatar || '/logo.png'} alt="" className="w-10 h-10 rounded-xl object-cover" />
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-foreground text-sm">{q.customerName || (ar ? 'عميل' : 'Customer')}</p>
                     <p className="text-xs text-muted-foreground">{q.service?.name}</p>
@@ -424,7 +431,7 @@ export default function BarberDashboardPage() {
                 <div key={booking.id} className="bg-card border border-border rounded-2xl p-4">
                   <div className="flex items-center gap-3 mb-3">
                     <img
-                      src={booking.customerAvatar || `https://i.pravatar.cc/150?u=${booking.customerId}`}
+                      src={booking.customerAvatar || '/logo.png'}
                       alt=""
                       className="w-10 h-10 rounded-xl object-cover"
                     />

@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getBarber, updateBarberProfile } from '@/lib/db';
-import { uploadImage } from '@/lib/storage';
+import { describeImageUploadError, uploadImage } from '@/lib/storage';
 import type { Service } from '@/types';
 
 const SERVICE_ICONS = ['✂️', '💈', '🪒', '👑', '⭐', '🔥', '💇', '🎯'];
@@ -52,8 +52,8 @@ function ServiceSheet({
       const url = await uploadImage(file, `barbers/${barberUid}/services/${serviceId}-${Date.now()}.jpg`);
       setPhoto(url);
       toast.success(ar ? 'تم رفع الصورة' : 'Photo uploaded');
-    } catch {
-      toast.error(ar ? 'فشل رفع الصورة' : 'Upload failed');
+    } catch (error) {
+      toast.error(ar ? 'فشل رفع الصورة' : 'Upload failed', { description: describeImageUploadError(error, ar) });
     } finally {
       setUploading(false);
       e.target.value = '';

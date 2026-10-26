@@ -30,6 +30,11 @@ dist-ssr
 
 # Build artefacts
 app-debug.apk
+*.apk
+*.aab
+*.aab.idsig
+*.jks
+*.keystore
 build.log
 capsync.log
 gradle-build.log
@@ -59,6 +64,17 @@ android/*.jks
 android/app/*.keystore
 android/app/*.jks
 android/app/src/main/assets/public/
+
+# Local Android build toolchain and private delivery materials
+release/
+tools/android-sdk/
+tools/android-user-home/
+tools/gradle-cache/
+tools/jdk*/
+tools/*.zip
+tools/*.jar
+tools/audit-*.png
+tools/lint-*.json
 
 # Capacitor
 .capacitor/

@@ -1,11 +1,6 @@
-const POLLINATIONS_TEXT = 'https://text.pollinations.ai/';
-
-const GROK_KEY = import.meta.env.VITE_GROK_API_KEY as string;
-const GROK_URL = 'https://api.x.ai/v1/chat/completions';
-const GROK_TEXT_MODEL = 'grok-2-1212';
-const GROK_VISION_MODEL = 'grok-2-vision-1212';
-
-const REPLICATE_TOKEN = import.meta.env.VITE_REPLICATE_TOKEN as string;
+async function callAI<T>(_name: string, _data: Record<string, unknown>): Promise<T> {
+  throw new Error('The secure AI service has not been configured.');
+}
 
 export const ASSISTANT_NAME = 'حلاقي AI';
 
@@ -14,25 +9,11 @@ export interface GrokMessage {
   content: string;
 }
 
-const SYSTEM = `أنت ${ASSISTANT_NAME}، المساعد الذكي لتطبيق "حلاقي" لحجز الحلاقين في الأردن.
+const SYSTEM = `أنت ${ASSISTANT_NAME}، مساعد لتطبيق حلاقي. أجب بلغة المستخدم وباختصار. قدّم نصائح عامة للحلاقة، لكن لا تختلق أسماء صالونات أو تقييمات أو أسعاراً أو مواعيد أو أرصدة أو حالة توفر. استخدم بيانات السياق فقط لهذه المعلومات، وإذا لم تتوفر فقل ذلك بوضوح. لا تدّع تنفيذ حجز أو إرسال رسالة؛ وجّه المستخدم إلى أدوات التطبيق لذلك.`;
 
-قواعد أساسية:
-- أجب دائماً بنفس لغة المستخدم (عربية أردنية أو إنجليزية). الافتراضي عربي.
-- ردودك 2-4 جمل ذكية ومفيدة، بدون حشو.
-- أنت خبير حلاقة: تعرف كل أنواع القصات (فيد، تيبر، انڤيد، كلاسيك، بوكس، فرنشي، سكين فيد) واللحى.
-- عند تحليل الصور: صف القصة أو اللحية بدقة — النوع، الطول، الأسلوب، والتفاصيل.
-- يمكنك توليد صور قصات: قل للمستخدم يكتب الوصف ويضغط زر العصا 🪄.
-
-قدراتك:
-1. تحقق من حالة حجز المستخدم الحالي
-2. تعرف الحلاقين المتاحين والمشغولين من السياق
-3. ترسل إشعار لحلاق عبر: [NOTIFY]{"barberId":"[id]","barberName":"[الاسم]","message":"[الرسالة]"}[/NOTIFY]
-4. تساعد في الحجز عبر: [BOOKING]{"barberId":"[id]","barberName":"[الاسم]","service":"[الخدمة]","time":"[الوقت]"}[/BOOKING]
-5. تعطي اقتراحات ذكية بناءً على التوفر والتقييم
-
-الأسعار الشائعة: حلاقة 15 JOD، تشذيب لحية 8 JOD، حلاقة+لحية 20 JOD، غسيل شعر 5 JOD.`;
-
-async function* readSSE(response: Response): AsyncGenerator<string> {
+/* Disabled legacy browser-side provider calls. Third-party AI must go through
+   authenticated Firebase Functions so provider keys never ship in the app. */
+/* async function* readSSE(response: Response): AsyncGenerator<string> {
   if (!response.ok || !response.body) {
     const text = await response.text().catch(() => '');
     throw new Error(`API ${response.status}: ${text.slice(0, 200)}`);
@@ -209,6 +190,24 @@ export async function generateImage(prompt: string): Promise<string> {
   const blob2 = await resp2.blob();
   if (!blob2.type.startsWith('image/')) throw new Error('Not an image');
   return URL.createObjectURL(blob2);
+}
+
+*/
+
+export async function* chatStream(history: GrokMessage[], context?: string): AsyncGenerator<string> {
+  const result = await callAI<{ text: string }>('halaqiAssistant', { history, context });
+  if (result.text) yield result.text;
+}
+
+export async function* analyzeImageStream(imageDataUrl: string, userText: string): AsyncGenerator<string> {
+  const result = await callAI<{ text: string }>('halaqiAssistant', { imageDataUrl, userText });
+  if (result.text) yield result.text;
+}
+
+export async function generateImage(prompt: string): Promise<string> {
+  const result = await callAI<{ imageUrl: string }>('halaqiGenerateImage', { prompt });
+  if (!result.imageUrl) throw new Error('Image generation is unavailable.');
+  return result.imageUrl;
 }
 
 export interface BookingAction {

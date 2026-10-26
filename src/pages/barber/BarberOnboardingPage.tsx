@@ -8,13 +8,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { updateBarberProfile, completeBarberOnboarding, addStaffMember } from '@/lib/db';
-import { pickImage, uploadImage, profileImagePath } from '@/lib/storage';
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import { updateBarberProfile, completeBarberOnboarding, addStaffMember, type BarberDoc } from '@/lib/db';
+import { pickImage, uploadImage, profileImagePath, describeImageUploadError } from '@/lib/storage';
+import { getCurrentLocation } from '@/lib/location';
+import { MapContainer, Marker, useMapEvents } from 'react-leaflet';
+import MapTileLayer from '@/components/maps/MapTileLayer';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-delete (L.Icon.Default.prototype as any)._getIconUrl;
+const defaultIconPrototype = L.Icon.Default.prototype as typeof L.Icon.Default.prototype & { _getIconUrl?: string };
+delete defaultIconPrototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: '/marker-icon-2x.png',
   iconUrl: '/marker-icon.png',
@@ -29,36 +32,31 @@ function FlyToPosition({ position }: { position: [number, number] | null }) {
   return null;
 }
 
+function RegisterMapPicker({ onSelect }: { onSelect: (lat: number, lng: number) => void }) {
+  useMapEvents({ click: event => onSelect(event.latlng.lat, event.latlng.lng) });
+  return null;
+}
+
 function MapPicker({ onSelect, position }: { onSelect: (lat: number, lng: number) => void; position: [number, number] | null }) {
   const [locating, setLocating] = useState(false);
   const [userPos, setUserPos] = useState<[number, number] | null>(null);
 
   const locateMe = () => {
-    if (!navigator.geolocation) return;
     setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
-        setUserPos(coords);
-        onSelect(coords[0], coords[1]);
-        setLocating(false);
-      },
-      () => setLocating(false),
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
-  };
-
-  const Inner = () => {
-    useMapEvents({ click(e) { onSelect(e.latlng.lat, e.latlng.lng); } });
-    return null;
+    void getCurrentLocation({ enableHighAccuracy: true, timeout: 30000 }).then(pos => {
+      const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+      setUserPos(coords);
+      onSelect(coords[0], coords[1]);
+    }).catch(() => toast.error('تعذر تحديد الموقع'))
+      .finally(() => setLocating(false));
   };
 
   return (
     <div className="relative">
       <div className="h-64 w-full rounded-2xl overflow-hidden border border-border relative z-0">
-        <MapContainer center={position || userPos || [31.9539, 35.9106]} zoom={13} style={{ height: '100%', width: '100%' }} attributionControl={false}>
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="" />
-          <Inner />
+        <MapContainer center={position || userPos || [31.9539, 35.9106]} zoom={13} style={{ height: '100%', width: '100%' }}>
+          <MapTileLayer />
+          <RegisterMapPicker onSelect={onSelect} />
           <FlyToPosition position={position} />
           {position && <Marker position={position} />}
         </MapContainer>
@@ -113,14 +111,14 @@ export default function BarberOnboardingPage() {
 
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
 
-  const [workingHours, setWorkingHours] = useState({ open: '09:00', close: '21:00', days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] });
+  const [workingHours, setWorkingHours] = useState({ open: '', close: '', days: [] as string[] });
 
   const [chairs, setChairs] = useState(2);
 
   const [services, setServices] = useState<{ id: string; name: string; price: number; duration: number; icon: string }[]>([]);
   const [svcName, setSvcName] = useState('');
-  const [svcPrice, setSvcPrice] = useState(15);
-  const [svcDuration, setSvcDuration] = useState(30);
+  const [svcPrice, setSvcPrice] = useState('');
+  const [svcDuration, setSvcDuration] = useState('');
   const [svcIcon, setSvcIcon] = useState('✂️');
   const SERVICE_ICONS = ['✂️', '💈', '🪒', '👑', '⭐', '🔥', '💇', '🎯'];
 
@@ -129,7 +127,7 @@ export default function BarberOnboardingPage() {
   const [showAddStaff, setShowAddStaff] = useState(false);
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffSpecialty, setNewStaffSpecialty] = useState('');
-  const [newStaffHours, setNewStaffHours] = useState({ open: '09:00', close: '18:00' });
+  const [newStaffHours, setNewStaffHours] = useState({ open: '', close: '' });
   const [newStaffAvatarFile, setNewStaffAvatarFile] = useState<File | null>(null);
   const [newStaffAvatarPreview, setNewStaffAvatarPreview] = useState('');
   const [addingStaff, setAddingStaff] = useState(false);
@@ -150,13 +148,12 @@ export default function BarberOnboardingPage() {
 
   const handleAddStaff = async () => {
     if (!newStaffName.trim()) return;
+    if (!newStaffHours.open || !newStaffHours.close || newStaffHours.open >= newStaffHours.close) {
+      toast.error(ar ? 'أدخل ساعات عمل صحيحة للحلاق' : 'Enter valid working hours for this barber');
+      return;
+    }
     setAddingStaff(true);
     try {
-      let avatarUrl = '';
-      if (newStaffAvatarFile) {
-        const tempId = Math.random().toString(36).slice(2);
-        avatarUrl = await uploadImage(newStaffAvatarFile, `barbers/${uid}/staff/${tempId}.jpg`);
-      }
       const id = Math.random().toString(36).slice(2);
       setStaff(prev => [...prev, {
         id,
@@ -164,74 +161,91 @@ export default function BarberOnboardingPage() {
         specialties: newStaffSpecialty.split(',').map(s => s.trim()).filter(Boolean),
         workingHours: { ...newStaffHours },
         avatarFile: newStaffAvatarFile,
-        avatarPreview: avatarUrl || newStaffAvatarPreview,
+        avatarPreview: newStaffAvatarPreview,
       }]);
       setShowAddStaff(false);
       setNewStaffName('');
       setNewStaffSpecialty('');
-      setNewStaffHours({ open: '09:00', close: '18:00' });
+      setNewStaffHours({ open: '', close: '' });
       setNewStaffAvatarFile(null);
       setNewStaffAvatarPreview('');
+    } catch (error) {
+      toast.error(describeImageUploadError(error, ar));
     } finally {
       setAddingStaff(false);
     }
   };
 
   const addService = () => {
-    if (!svcName.trim()) return;
-    setServices(prev => [...prev, { id: Math.random().toString(36).slice(2), name: svcName.trim(), price: svcPrice, duration: svcDuration, icon: svcIcon }]);
+    const price = Number(svcPrice);
+    const duration = Number(svcDuration);
+    if (!svcName.trim() || !Number.isFinite(price) || price < 0 || !Number.isInteger(duration) || duration < 1) {
+      toast.error(ar ? 'أدخل اسم الخدمة وسعراً صحيحاً ومدة بالدقائق' : 'Enter a service name, valid price, and duration in minutes');
+      return;
+    }
+    setServices(prev => [...prev, { id: Math.random().toString(36).slice(2), name: svcName.trim(), price, duration, icon: svcIcon }]);
     setSvcName('');
-    setSvcPrice(15);
-    setSvcDuration(30);
+    setSvcPrice('');
+    setSvcDuration('');
   };
-
-  const tryUpload = (file: File, path: string): Promise<string> =>
-    Promise.race([
-      uploadImage(file, path),
-      new Promise<string>((_, reject) => setTimeout(() => reject(new Error('timeout')), 7000)),
-    ]).catch(() => '');
 
   const handleFinish = async () => {
     if (!uid) return;
+    if (!salonName.trim() || !coords || services.length === 0) {
+      toast.error(ar ? 'أكمل اسم الصالون وموقعه وأضف خدمة واحدة على الأقل' : 'Enter a salon name, pin its location, and add at least one service');
+      return;
+    }
     setLoading(true);
     try {
-      const avatarUrl = avatar ? await tryUpload(avatar.file, profileImagePath(uid, 'avatar')) : '';
-
+      let avatarUrl = '';
       const galleryUrls: string[] = [];
-      for (const [i, g] of galleryFiles.entries()) {
-        const url = await tryUpload(g.file, profileImagePath(uid, 'gallery') + `_${i}`);
-        if (url) galleryUrls.push(url);
+      const mediaFailures: unknown[] = [];
+      if (avatar) {
+        try { avatarUrl = await uploadImage(avatar.file, profileImagePath(uid, 'avatar')); }
+        catch (error) { mediaFailures.push(error); }
       }
 
-      await updateBarberProfile(uid, {
-        shopName: salonName.trim() || 'My Salon',
+      for (const [i, g] of galleryFiles.entries()) {
+        try {
+          const url = await uploadImage(g.file, `${profileImagePath(uid, 'gallery')}_${i}`);
+          galleryUrls.push(url);
+        } catch (error) { mediaFailures.push(error); }
+      }
+
+      const barberPatch: Partial<BarberDoc> = {
+        shopName: salonName.trim(),
         description: description.trim(),
         ...(avatarUrl ? { avatar: avatarUrl } : {}),
-        lat: coords?.lat,
-        lng: coords?.lng,
+        lat: coords.lat,
+        lng: coords.lng,
         workingHours,
         totalChairs: chairs,
         services,
         ...(galleryUrls.length ? { gallery: galleryUrls } : {}),
-      } as any);
+      };
+      await updateBarberProfile(uid, barberPatch);
 
       for (const s of staff) {
-        try {
-          await addStaffMember(uid, {
-            barberId: uid,
-            name: s.name,
-            specialties: s.specialties,
-            avatar: s.avatarPreview || '',
-            workingHours: s.workingHours,
-          });
-        } catch {  }
+        let staffAvatar = '';
+        if (s.avatarFile) {
+          try { staffAvatar = await uploadImage(s.avatarFile, `barbers/${uid}/staff/${s.id}.jpg`); }
+          catch (error) { mediaFailures.push(error); }
+        }
+        await addStaffMember(uid, {
+          barberId: uid,
+          name: s.name,
+          specialties: s.specialties,
+          avatar: staffAvatar,
+          workingHours: s.workingHours,
+        });
       }
 
       await completeBarberOnboarding(uid);
       toast.success(ar ? '🎉 تم إعداد الصالون بنجاح!' : '🎉 Salon is ready!');
+      if (mediaFailures.length) toast.error(describeImageUploadError(mediaFailures[0], ar));
       navigate('/barber', { replace: true });
-    } catch (e: any) {
-      toast.error(e?.message || (ar ? 'فشل الحفظ، حاول مجدداً' : 'Save failed, try again'));
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : (ar ? 'فشل الحفظ، حاول مجدداً' : 'Save failed, try again'));
     } finally {
       setLoading(false);
     }
@@ -240,6 +254,10 @@ export default function BarberOnboardingPage() {
   const nextStep = () => {
     if (step === 1 && !salonName.trim()) { toast.error(ar ? 'أدخل اسم الصالون' : 'Enter salon name'); return; }
     if (step === 2 && !coords) { toast.error(ar ? 'حدد الموقع على الخريطة' : 'Select location on map'); return; }
+    if (step === 3 && (!workingHours.open || !workingHours.close || workingHours.open >= workingHours.close || workingHours.days.length === 0)) {
+      toast.error(ar ? 'أدخل ساعات العمل واختر يوم عمل واحداً على الأقل' : 'Set valid opening hours and select at least one working day'); return;
+    }
+    if (step === 4 && services.length === 0) { toast.error(ar ? 'أضف خدمة واحدة على الأقل بسعر ومدة صحيحين' : 'Add at least one service with a valid price and duration'); return; }
     setStep(s => s + 1);
   };
 
@@ -423,12 +441,12 @@ export default function BarberOnboardingPage() {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-[10px] text-muted-foreground font-bold block mb-1">{ar ? 'السعر (JOD)' : 'Price (JOD)'}</label>
-                    <input type="number" value={svcPrice} onChange={e => setSvcPrice(Number(e.target.value))}
+                    <input type="number" min="0" step="0.01" value={svcPrice} onChange={e => setSvcPrice(e.target.value)}
                       className="w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm outline-none focus:border-primary" />
                   </div>
                   <div>
                     <label className="text-[10px] text-muted-foreground font-bold block mb-1">{ar ? 'المدة (دقيقة)' : 'Duration (min)'}</label>
-                    <input type="number" value={svcDuration} onChange={e => setSvcDuration(Number(e.target.value))}
+                    <input type="number" min="1" step="1" value={svcDuration} onChange={e => setSvcDuration(e.target.value)}
                       className="w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm outline-none focus:border-primary" />
                   </div>
                 </div>

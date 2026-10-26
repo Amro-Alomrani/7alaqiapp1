@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { loginEmail, resetPassword } from '@/lib/auth-providers';
-import { mapAuthError } from './LoginPage';
+import { authErrorCode, mapAuthError } from '@/lib/authErrors';
 
 export default function BarberLoginPage() {
   const navigate = useNavigate();
@@ -44,14 +44,14 @@ export default function BarberLoginPage() {
         barberDoc = await createBarberProfile(user.uid, {
           name: user.name || email.split('@')[0],
           shopName: `${user.name || email.split('@')[0]}'s Shop`,
-          avatar: user.avatar || `https://i.pravatar.cc/150?u=${encodeURIComponent(email)}`,
+          avatar: user.avatar || '/logo.png',
         });
       }
       loginBarber(user.email || email, user.uid, barberDoc.name || user.name, barberDoc.shopName);
       toast.success(ar ? `أهلاً ${barberDoc.name || user.name || ''} ✂️` : `Welcome, ${barberDoc.name || user.name || ''} ✂️`);
-      navigate((barberDoc as any).onboardingComplete ? '/barber' : '/barber/onboarding');
-    } catch (e: any) {
-      toast.error(mapAuthError(e?.code, ar));
+      navigate(barberDoc.onboardingComplete ? '/barber' : '/barber/onboarding');
+    } catch (error: unknown) {
+      toast.error(mapAuthError(authErrorCode(error), ar));
     } finally {
       setLoading(false);
     }
@@ -65,8 +65,8 @@ export default function BarberLoginPage() {
     try {
       await resetPassword(email.trim());
       toast.success(ar ? '📧 تم إرسال رابط استعادة كلمة المرور' : '📧 Reset link sent');
-    } catch (e: any) {
-      toast.error(mapAuthError(e?.code, ar));
+    } catch (error: unknown) {
+      toast.error(mapAuthError(authErrorCode(error), ar));
     }
   };
 

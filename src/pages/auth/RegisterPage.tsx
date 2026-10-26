@@ -1,19 +1,47 @@
-import { useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
+import { useSafeBack } from "@/hooks/useSafeBack";
+import { Capacitor } from '@capacitor/core';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, Globe, User, Phone, Mail, Lock, Scissors, MapPin, Loader2, Eye, EyeOff, Gift, Shield, X } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { ChevronLeft, Globe, User, Phone, Mail, Lock, Scissors, MapPin, Loader2, Eye, EyeOff, Gift } from 'lucide-react';
+import { MapContainer, Marker, useMap, useMapEvents } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { registerEmail, sendPhoneOTP, verifyPhoneOTP } from '@/lib/auth-providers';
-import { mapAuthError } from './LoginPage';
+import { registerEmail } from '@/lib/auth-providers';
+import { mapAuthError } from '@/lib/authErrors';
 import { processReferralSignup } from '@/lib/db';
+import { getCurrentLocation } from '@/lib/location';
+import MapTileLayer from '@/components/maps/MapTileLayer';
+
+const PICKER_ICON = L.divIcon({
+  className: '',
+  html: '<div style="width:22px;height:22px;border:3px solid white;border-radius:50%;background:#f59e0b;box-shadow:0 2px 8px #0008"></div>',
+  iconSize: [22, 22],
+  iconAnchor: [11, 11],
+});
+
+function RegisterMapPicker({ onPick }: { onPick: (position: { lat: number; lng: number }) => void }) {
+  useMapEvents({ click: event => onPick({ lat: event.latlng.lat, lng: event.latlng.lng }) });
+  return null;
+}
+
+function CenterSelectedLocation({ position }: { position: { lat: number; lng: number } | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (position) map.flyTo([position.lat, position.lng], Math.max(map.getZoom(), 16), { duration: 0.6 });
+  }, [map, position]);
+  return null;
+}
 
 type Role = 'customer' | 'barber';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
+  const safeBack = useSafeBack();
   const { loginCustomer, loginBarber } = useAuth();
   const { language, setLanguage } = useLanguage();
   const ar = language === 'ar';
@@ -27,45 +55,38 @@ export default function RegisterPage() {
   const [address, setAddress] = useState('');
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [locating, setLocating] = useState(false);
+  const [mapPickerOpen, setMapPickerOpen] = useState(false);
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [referralCode, setReferralCode] = useState('');
 
-  const [otpStep, setOtpStep] = useState(false);
-  const [verificationId, setVerificationId] = useState('');
-  const [otpCode, setOtpCode] = useState('');
-  const [otpLoading, setOtpLoading] = useState(false);
-  const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  const fullPhone = () => phone ? `+962${phone.replace(/^0+/, '')}` : '';
+  const fullPhone = () => {
+    const digits = phone.replace(/\D/g, '').replace(/^962/, '').replace(/^0+/, '');
+    return digits ? `+962${digits}` : '';
+  };
 
   const captureLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error(ar ? 'جهازك لا يدعم تحديد الموقع' : 'Geolocation not supported');
-      return;
-    }
+    if (locating) return;
     setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setLocating(false);
-        toast.success(ar ? '📍 تم تحديد موقع الصالون' : '📍 Salon location captured');
-      },
-      err => {
-        setLocating(false);
-        toast.error(
-          err.code === 1
-            ? (ar ? 'تم رفض إذن الموقع — فعّله من إعدادات المتصفح' : 'Permission denied — enable in settings')
-            : (ar ? 'فشل تحديد الموقع' : 'Failed to get location')
-        );
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-    );
+    const isNative = Capacitor.isNativePlatform();
+    void getCurrentLocation({
+      // Ask the browser/device for its best fix first; the shared helper falls
+      // back to a recent approximate fix when GPS is unavailable.
+      enableHighAccuracy: true,
+      timeout: isNative ? 30000 : 20000,
+      maximumAge: isNative ? 0 : 30000,
+    }).then(pos => {
+      setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      toast.success(ar ? '📍 تم تحديد موقع الصالون' : '📍 Salon location captured');
+    }).catch(() => {
+      toast.error(ar ? 'تعذر تحديد الموقع' : 'Could not determine location');
+    }).finally(() => setLocating(false));
   };
 
   const canSubmit = () => {
     if (!name.trim() || !email.trim() || password.length < 6) return false;
-    if (role === 'customer' && phone.replace(/\D/g, '').length < 7) return false;
+    if (role === 'customer' && !/^7\d{8}$/.test(phone.replace(/\D/g, '').replace(/^962/, '').replace(/^0+/, ''))) return false;
     if (role === 'barber' && (!shopName.trim() || !address.trim() || !coords)) return false;
     return true;
   };
@@ -87,11 +108,19 @@ export default function RegisterPage() {
       if (role === 'customer') {
         loginCustomer(user.phone || '', user.name, user.uid);
         if (referralCode.trim()) {
-          const referred = await processReferralSignup(user.uid, user.name || name.trim(), referralCode.trim());
-          if (referred) {
-            toast.success(ar ? '🎁 ربحت 50 نقطة كمكافأة ترحيب!' : '🎁 You earned 50 welcome points!');
-          } else {
-            toast(ar ? 'كود الإحالة غير صحيح أو منتهي' : 'Referral code not found');
+          try {
+            const referred = await processReferralSignup(referralCode.trim());
+            if (referred === 'awarded') {
+              toast.success(ar ? '🎁 ربحت 50 نقطة كمكافأة ترحيب!' : '🎁 You earned 50 welcome points!');
+            } else if (referred === 'already_processed') {
+              toast.success(ar ? 'تم تسجيل الدعوة مسبقاً' : 'This invite was already processed');
+            } else {
+              toast.error(ar ? 'كود الدعوة غير صحيح، لم تُضف نقاط' : 'Invalid invite code; no points were added');
+            }
+          } catch (error) {
+            toast.error(ar ? 'تم إنشاء الحساب، لكن تعذرت معالجة الدعوة. تواصل مع الدعم قبل إعادة المحاولة.' : 'Account created, but the invite could not be processed. Contact support before trying again.', {
+              description: error instanceof Error ? error.message : undefined,
+            });
           }
         }
         toast.success(ar ? `مرحباً ${user.name} 🎉` : `Welcome, ${user.name} 🎉`);
@@ -101,8 +130,11 @@ export default function RegisterPage() {
         toast.success(ar ? `مرحباً ${user.name} ✂️` : `Welcome, ${user.name} ✂️`);
         navigate('/barber');
       }
-    } catch (e: any) {
-      toast.error(mapAuthError(e?.code, ar));
+    } catch (error: unknown) {
+      const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+        ? error.code
+        : undefined;
+      toast.error(mapAuthError(code, ar));
     } finally {
       setLoading(false);
     }
@@ -117,52 +149,11 @@ export default function RegisterPage() {
       toast.error(ar ? 'املأ جميع الحقول' : 'Fill in all required fields');
       return;
     }
-    if (role === 'customer' && phone.replace(/\D/g, '').length >= 7) {
-      setLoading(true);
-      try {
-        const result = await sendPhoneOTP(fullPhone());
-        setVerificationId(result.verificationId);
-        setOtpCode('');
-        setOtpStep(true);
-        toast.success(ar ? `📲 تم إرسال رمز التحقق إلى ${fullPhone()}` : `📲 OTP sent to ${fullPhone()}`);
-      } catch {
-        toast.error(ar ? 'فشل إرسال الرمز' : 'Failed to send OTP');
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
     await doCreateAccount();
   };
 
-  const handleVerifyOTP = async () => {
-    if (otpCode.length !== 6) {
-      toast.error(ar ? 'أدخل الرمز المكوّن من 6 أرقام' : 'Enter the 6-digit code');
-      return;
-    }
-    setOtpLoading(true);
-    try {
-      await verifyPhoneOTP(verificationId, otpCode, fullPhone());
-      setOtpStep(false);
-      await doCreateAccount();
-    } catch {
-      toast.error(ar ? 'رمز التحقق غير صحيح' : 'Invalid verification code');
-    } finally {
-      setOtpLoading(false);
-    }
-  };
-
-  const handleOtpInput = (i: number, value: string) => {
-    const digit = value.replace(/\D/g, '').slice(-1);
-    const chars = otpCode.split('');
-    chars[i] = digit;
-    const next = chars.join('').slice(0, 6);
-    setOtpCode(next);
-    if (digit && i < 5) otpRefs.current[i + 1]?.focus();
-  };
-
   return (
-    <div className="min-h-screen flex flex-col px-6 pt-20 pb-8 bg-background relative overflow-hidden" dir={ar ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen flex flex-col px-6 pt-20 pb-8 bg-background relative overflow-x-hidden" dir={ar ? 'rtl' : 'ltr'}>
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[500px] h-[250px] rounded-full opacity-15"
           style={{ background: 'radial-gradient(ellipse, hsl(38 92% 52%) 0%, transparent 70%)' }} />
@@ -170,7 +161,7 @@ export default function RegisterPage() {
           style={{ background: 'radial-gradient(circle, hsl(38 92% 52%) 0%, transparent 70%)' }} />
       </div>
       <button
-        onClick={() => navigate(-1)}
+        onClick={() => safeBack()}
         className={`absolute top-14 ${ar ? 'right-5' : 'left-5'} flex items-center gap-1 text-muted-foreground z-10`}
       >
         <ChevronLeft size={16} className={ar ? 'rotate-180' : ''} />
@@ -279,10 +270,35 @@ export default function RegisterPage() {
                   ? <><MapPin size={16} /> {ar ? `📍 الموقع جاهز (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})` : `📍 Location set (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})`}</>
                   : <><MapPin size={16} /> {ar ? 'حدد موقع الصالون على الخريطة' : 'Capture salon location'}</>}
             </button>
-            {!coords && (
-              <p className="text-[11px] text-muted-foreground text-center -mt-2">
-                {ar ? 'الزبائن سيرون موقعك على الخريطة' : 'Customers will see your salon on the map'}
-              </p>
+            {role === 'barber' && (
+              <div className="-mt-2 space-y-2">
+                <p className="text-[11px] text-muted-foreground text-center">
+                  {coords
+                    ? (ar ? 'تأكد من النقطة أو صححها يدوياً على الخريطة.' : 'Verify or adjust the pin manually on the map.')
+                    : (ar ? 'يمكنك اختيار موقع الصالون يدوياً إذا لم يعمل GPS.' : 'Choose the salon location manually if GPS is unavailable.')}
+                </p>
+                <button type="button" onClick={() => setMapPickerOpen(open => !open)}
+                  className="w-full rounded-xl border border-border bg-card py-2 text-xs font-bold text-foreground">
+                  {mapPickerOpen ? (ar ? 'إغلاق الخريطة' : 'Close map') : (ar ? 'اختيار الموقع على الخريطة' : 'Choose location on map')}
+                </button>
+                {mapPickerOpen && (
+                  <div className="overflow-hidden rounded-2xl border border-border">
+                    <p className="bg-card px-3 py-2 text-[11px] text-muted-foreground">
+                      {ar ? 'اضغط على موقع الصالون بدقة. مركز الخريطة في عمّان للعرض فقط وليس موقع جهازك.' : 'Tap the exact salon location. Amman is only the initial map view, not your device location.'}
+                    </p>
+                    <MapContainer center={coords ? [coords.lat, coords.lng] : [31.9539, 35.9106]} zoom={coords ? 16 : 12}
+                      style={{ height: 240, width: '100%' }} scrollWheelZoom>
+                      <MapTileLayer />
+                      <CenterSelectedLocation position={coords} />
+                      <RegisterMapPicker onPick={position => setCoords(position)} />
+                      {coords && <Marker position={[coords.lat, coords.lng]} icon={PICKER_ICON} />}
+                    </MapContainer>
+                    {coords && <p className="bg-card px-3 py-2 text-center text-xs font-bold text-primary">
+                      {ar ? `تم حفظ النقطة: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}` : `Selected: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`}
+                    </p>}
+                  </div>
+                )}
+              </div>
             )}
           </>
         )}
@@ -324,95 +340,6 @@ export default function RegisterPage() {
         </p>
       </motion.div>
 
-      <AnimatePresence>
-        {otpStep && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end justify-center"
-            onClick={() => setOtpStep(false)}
-          >
-            <motion.div
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-              onClick={e => e.stopPropagation()}
-              className="w-full max-w-sm bg-background border border-border rounded-t-3xl p-6 pb-10"
-              dir={ar ? 'rtl' : 'ltr'}
-            >
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-2">
-                  <div className="w-10 h-10 bg-primary/10 rounded-2xl flex items-center justify-center">
-                    <Shield size={18} className="text-primary" />
-                  </div>
-                  <div>
-                    <p className="font-black text-foreground text-base">{ar ? 'التحقق من الهاتف' : 'Phone Verification'}</p>
-                    <p className="text-xs text-muted-foreground">{ar ? `تم الإرسال إلى ${fullPhone()}` : `Sent to ${fullPhone()}`}</p>
-                  </div>
-                </div>
-                <button onClick={() => setOtpStep(false)} className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
-                  <X size={14} />
-                </button>
-              </div>
-
-              <p className="text-sm text-muted-foreground mb-4 text-center">
-                {ar ? 'أدخل رمز التحقق المكوّن من 6 أرقام' : 'Enter the 6-digit verification code'}
-              </p>
-
-              <div className="flex justify-center gap-2 mb-6" dir="ltr">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <input
-                    key={i}
-                    ref={el => { otpRefs.current[i] = el; }}
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={1}
-                    value={otpCode[i] || ''}
-                    onChange={e => handleOtpInput(i, e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Backspace' && !otpCode[i] && i > 0) {
-                        otpRefs.current[i - 1]?.focus();
-                        const chars = otpCode.split('');
-                        chars[i - 1] = '';
-                        setOtpCode(chars.join(''));
-                      }
-                    }}
-                    className={`w-11 h-13 text-center text-xl font-black border-2 rounded-xl bg-card outline-none transition-all ${
-                      otpCode[i] ? 'border-primary text-foreground' : 'border-border text-muted-foreground'
-                    }`}
-                    style={{ height: '3.25rem' }}
-                  />
-                ))}
-              </div>
-
-              <Button
-                onClick={handleVerifyOTP}
-                disabled={otpCode.length < 6 || otpLoading}
-                className="w-full h-12 text-base font-bold rounded-2xl bg-primary text-primary-foreground"
-              >
-                {otpLoading
-                  ? <><Loader2 size={16} className="animate-spin me-2" />{ar ? 'جاري التحقق...' : 'Verifying...'}</>
-                  : (ar ? 'تحقق وأنشئ الحساب ✓' : 'Verify & Create Account ✓')
-                }
-              </Button>
-
-              <button
-                onClick={async () => {
-                  const result = await sendPhoneOTP(fullPhone());
-                  setVerificationId(result.verificationId);
-                  setOtpCode('');
-                  toast.success(ar ? 'تم إعادة إرسال الرمز' : 'Code resent');
-                }}
-                className="w-full text-center text-xs text-primary font-bold mt-3"
-              >
-                {ar ? 'إعادة إرسال الرمز' : 'Resend code'}
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

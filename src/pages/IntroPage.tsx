@@ -402,7 +402,7 @@ function IntroScene({ onFinish }: { onFinish: () => void }) {
         {t > 3.6 && t < 4.4 && <SparkBurst at={[-8, 110]} start={3.6} t={t} />}
 
         <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', zIndex: 4 }}>
-          <div style={{ fontFamily: 'Georgia, serif', fontSize: 92, fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1, display: 'flex', justifyContent: 'center', color: '#f5ead0', textShadow: `0 8px 50px rgba(212,175,111,.5)` }}>
+          <div dir="ltr" style={{ direction: 'ltr', unicodeBidi: 'isolate', fontFamily: 'Georgia, serif', fontSize: 92, fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1, display: 'flex', justifyContent: 'center', color: '#f5ead0', textShadow: `0 8px 50px rgba(212,175,111,.5)` }}>
             {letters.map((l, i) => (
               <span key={i} style={{ opacity: logoBuild[i].opacity, transform: `translateY(${logoBuild[i].y}px)`, filter: `blur(${logoBuild[i].blur}px)`, display: 'inline-block' }}>{l}</span>
             ))}
@@ -441,14 +441,14 @@ function IntroScene({ onFinish }: { onFinish: () => void }) {
 
 const SLIDES = {
   ar: [
-    { emoji: '✂️', tag: '🇯🇴 الأردن', title: 'حلاقي', sub: 'حلاقك... بضغطة', desc: 'احجز حلاقك المفضل في ثوانٍ، تابع قائمة الانتظار مباشرة، وجرّب تجربة حلاقة من مستوى آخر', chips: ['🗺️ خريطة مباشرة', '⚡ حجز فوري', '🤖 ذكاء اصطناعي', '🎁 نقاط مكافأة'] },
-    { emoji: '🗺️', tag: 'قائمة انتظار حية', title: 'احجز في ثوانٍ', sub: 'اعرف مين فاضي هلق', desc: 'شوف عدد الناس قبلك على الخريطة المباشرة، واحجز بضغطة واحدة مع إشعارات فورية عند دورك', chips: [] },
-    { emoji: '🤖', tag: 'ذكاء اصطناعي', title: 'حلاقي AI', sub: 'مساعدك الشخصي', desc: 'يحلّل صورتك ويقترح القصة المثالية لشكل وجهك، ويولّد تصاميم حصرية لا تجدها في أي مكان آخر', chips: [] },
+    { emoji: '✂️', tag: '🇯🇴 الأردن', title: 'حلاقي', sub: 'تصفّح الحلاقين والخدمات', desc: 'اطّلع على ملفات الحلاقين والخدمات والأسعار التي أضافوها، ثم اختر ما يناسبك.', chips: ['🔎 تصفّح الحلاقين', '✂️ خدمات مسجّلة', '💳 أسعار يحددها الحلاق'] },
+    { emoji: '📩', tag: 'طلب موعد', title: 'أرسل طلبك', sub: 'الحلاق يراجع التفاصيل', desc: 'اختر الحلاق والخدمة ووقتًا مقترحًا. يبقى الموعد طلبًا حتى يقبله الحلاق.', chips: [] },
+    { emoji: '📋', tag: 'حجوزاتك', title: 'تابع حالة الطلب', sub: 'التفاصيل تظهر في التطبيق', desc: 'راجع حالة حجزك المسجلة في التطبيق، وتواصل مع الحلاق عند الحاجة.', chips: [] },
   ],
   en: [
-    { emoji: '✂️', tag: '🇯🇴 Jordan', title: '7alaqi', sub: 'Your barber, one tap away', desc: "Book your barber in seconds, track the live queue on a map, and experience next-level grooming in Jordan", chips: ['🗺️ Live Map', '⚡ Instant Book', '🤖 AI Stylist', '🎁 Rewards'] },
-    { emoji: '🗺️', tag: 'Live Queue', title: 'Book in Seconds', sub: "See who's free right now", desc: "Check how many people are ahead on the live map, book with one tap, and get notified when it's your turn", chips: [] },
-    { emoji: '🤖', tag: 'AI', title: '7alaqi AI', sub: 'Your personal stylist', desc: 'Analyzes your photo and recommends the perfect cut for your face shape, then generates exclusive style designs', chips: [] },
+    { emoji: '✂️', tag: '🇯🇴 Jordan', title: '7alaqi', sub: 'Browse barbers and services', desc: 'View barber profiles and the services and prices they list, then choose what works for you.', chips: ['🔎 Browse barbers', '✂️ Listed services', '💳 Prices set by each barber'] },
+    { emoji: '📩', tag: 'Booking request', title: 'Send a request', sub: 'The barber reviews the details', desc: 'Choose a barber, service, and suggested time. The appointment remains a request until the barber accepts it.', chips: [] },
+    { emoji: '📋', tag: 'Your bookings', title: 'Follow request status', sub: 'Updates appear in the app', desc: 'Review the recorded status of your booking and contact the barber when needed.', chips: [] },
   ],
 };
 

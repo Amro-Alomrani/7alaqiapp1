@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useSafeBack } from "@/hooks/useSafeBack";
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -6,11 +7,13 @@ import jsQR from 'jsqr';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { recordCheckin } from '@/lib/db';
+import { getCurrentLocation } from '@/lib/location';
 
 type ScanState = 'idle' | 'scanning' | 'processing' | 'success' | 'error';
 
 export default function QRScanPage() {
   const navigate = useNavigate();
+  const safeBack = useSafeBack();
   const { customer } = useAuth();
   const { language } = useLanguage();
   const ar = language === 'ar';
@@ -60,17 +63,47 @@ export default function QRScanPage() {
     stopCamera();
     setScanState('processing');
     try {
-      let data: { barberId: string; barberName?: string; points?: number };
-      try { data = JSON.parse(text); } catch { data = { barberId: text, points: 30 }; }
-      if (!data.barberId) throw new Error('Invalid QR');
-      const pts = data.points ?? 30;
-      if (customer?.uid) {
-        await recordCheckin(customer.uid, customer.name || '', data.barberId).catch(() => {});
+      let barberId = '';
+      try {
+        const url = new URL(text);
+        if (url.protocol === 'halaqijo:' && url.hostname === 'barber') {
+          barberId = decodeURIComponent(url.pathname.replace(/^\//, ''));
+        }
+      } catch { /* The legacy JSON format is checked below. */ }
+      if (!barberId) {
+        try {
+          const legacy = JSON.parse(text) as { barberId?: unknown };
+          if (typeof legacy.barberId === 'string') barberId = legacy.barberId.trim();
+        } catch { /* Invalid QR payload. */ }
       }
-      setResult({ barberId: data.barberId, barberName: data.barberName, points: pts });
+      if (!barberId) throw new Error('Invalid QR');
+      if (!customer?.uid) throw new Error('Please sign in first.');
+      const position = await getCurrentLocation({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+      const checkin = await recordCheckin(customer.uid, customer.name || '', barberId, {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+      });
+      if (!checkin.success) throw new Error(checkin.message);
+      setResult({ barberId, barberName: checkin.barberName, points: checkin.points });
       setScanState('success');
-    } catch {
-      setError(ar ? 'رمز QR غير صالح' : 'Invalid QR code');
+    } catch (cause) {
+      const message = cause instanceof Error
+        ? cause.message
+        : typeof cause === 'object' && cause && 'message' in cause
+          ? String(cause.message)
+          : '';
+      if (/already checked in/i.test(message)) {
+        setError(ar ? 'سجّلت حضورك في هذا الصالون اليوم بالفعل.' : 'You have already checked in at this salon today.');
+      } else if (/location|position|permission|timeout/i.test(message)) {
+        setError(ar ? 'تعذر التحقق من موقعك. فعّل إذن الموقع وحاول مجدداً قرب الصالون.' : 'Could not verify your location. Allow location access and retry near the salon.');
+      } else if (/salon|barber|available|verified map/i.test(message)) {
+        setError(ar ? 'الصالون غير مفعّل أو لم يحفظ موقعاً صحيحاً بعد.' : 'This salon is not active or has not saved a valid location.');
+      } else if (/sign in/i.test(message)) {
+        setError(ar ? 'سجّل الدخول أولاً.' : 'Please sign in first.');
+      } else {
+        setError(ar ? 'رمز QR غير صالح أو تعذر تسجيل الزيارة.' : 'Invalid QR code or check-in could not be recorded.');
+      }
       setScanState('error');
     }
   };
@@ -99,7 +132,7 @@ export default function QRScanPage() {
   return (
     <div className="min-h-screen bg-background flex flex-col" dir={ar ? 'rtl' : 'ltr'}>
       <div className="flex items-center gap-3 px-5 pt-12 pb-4">
-        <button onClick={() => { stopCamera(); navigate(-1); }}
+        <button onClick={() => { stopCamera(); safeBack(); }}
           className="w-10 h-10 bg-card border border-border rounded-full flex items-center justify-center">
           <ArrowLeft size={18} className={ar ? 'rotate-180' : ''} />
         </button>

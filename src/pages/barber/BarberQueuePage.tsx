@@ -64,7 +64,7 @@ export default function BarberQueuePage() {
       id: b.id,
       position: i + 1,
       customerName: b.customerName || (ar ? 'عميل' : 'Customer'),
-      customerAvatar: b.customerAvatar || `https://i.pravatar.cc/150?u=${b.customerId}`,
+      customerAvatar: b.customerAvatar || '/logo.png',
       serviceName: b.service?.name || (ar ? 'خدمة' : 'Service'),
       waitTime: i * 15,
       status: b.status === 'in_progress' ? 'in_service' as const : 'waiting' as const,

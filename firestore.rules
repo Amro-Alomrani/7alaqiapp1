@@ -2,62 +2,254 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownsSalon(barberId) {
+      return signedIn() && (request.auth.uid == barberId
+        || get(/databases/$(database)/documents/barbers/$(barberId)).data.ownerUid == request.auth.uid);
+    }
+
+    function bookingParticipant(bookingId) {
+      let booking = get(/databases/$(database)/documents/bookings/$(bookingId)).data;
+      return signedIn() && (booking.customerUid == request.auth.uid || booking.barberId == request.auth.uid);
+    }
+
     match /barbers/{barberId} {
       allow read: if true;
-      allow write: if true;
+      allow create: if signedIn() && request.auth.uid == barberId
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if signedIn()
+        && (request.auth.uid == barberId || resource.data.ownerUid == request.auth.uid)
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name', 'shopName', 'avatar', 'coverImage', 'distance', 'eta', 'services',
+          'specialties', 'queueCount', 'available', 'featured', 'address', 'description',
+          'avgDuration', 'liveStatus', 'gallery', 'updatedAt', 'totalChairs', 'isOnboarded',
+          'staffIds', 'workingHours', 'lat', 'lng', 'isLive', 'onboardingComplete',
+          'fcmToken', 'liveLocation', 'liveLocationUpdatedAt', 'trustScore', 'offersHomeService', 'homeServiceFee'
+        ])
+        && request.resource.data.get('offersHomeService', false) is bool
+        && request.resource.data.get('homeServiceFee', 0) is number
+        && request.resource.data.get('homeServiceFee', 0) >= 0;
+      allow delete: if false;
     }
 
     match /posts/{postId} {
       allow read: if true;
-      allow create, update, delete: if true;
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'ownerUid', 'postedBy', 'barber', 'type', 'image', 'beforeImage', 'afterImage',
+          'hairStyle', 'tags', 'likes', 'comments', 'saves', 'location', 'caption',
+          'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.postedBy in ['barber', 'customer'];
+      allow update: if signedIn() && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'image', 'beforeImage', 'afterImage', 'hairStyle', 'tags', 'location', 'caption', 'updatedAt'
+        ]);
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
     }
 
     match /bookings/{bookingId} {
-      allow read, create, update, delete: if true;
+      allow read: if signedIn() && (resource.data.customerUid == request.auth.uid || resource.data.barberId == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.customerUid == request.auth.uid
+        && request.resource.data.status == 'requested'
+        && request.resource.data.barberId is string
+        && exists(/databases/$(database)/documents/barbers/$(request.resource.data.barberId))
+        && get(/databases/$(database)/documents/barbers/$(request.resource.data.barberId)).data.isLive == true
+        && request.resource.data.service in get(/databases/$(database)/documents/barbers/$(request.resource.data.barberId)).data.services
+        && request.resource.data.keys().hasOnly([
+          'customerUid', 'customerName', 'customerPhone', 'customerAvatar', 'barberId',
+          'barberName', 'barberShop', 'barberAvatar', 'staffId', 'staffName', 'staffAvatar',
+          'service', 'date', 'time', 'status', 'totalPrice', 'tip', 'payMethod', 'pointsEarned',
+          'notes', 'customerLocation', 'customerLocationUpdatedAt', 'homeServiceFee', 'homeService', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.totalPrice is number
+        && request.resource.data.service.price is number
+        && request.resource.data.get('tip', 0) is number
+        && request.resource.data.get('tip', 0) >= 0
+        && request.resource.data.get('homeServiceFee', 0) is number
+        && request.resource.data.get('homeServiceFee', 0) >= 0
+        && request.resource.data.get('homeService', false) is bool
+        && ((request.resource.data.get('homeService', false) == true
+            && get(/databases/$(database)/documents/barbers/$(request.resource.data.barberId)).data.get('offersHomeService', false) == true
+            && request.resource.data.get('homeServiceFee', 0) == get(/databases/$(database)/documents/barbers/$(request.resource.data.barberId)).data.get('homeServiceFee', 0))
+          || (request.resource.data.get('homeService', false) == false
+            && request.resource.data.get('homeServiceFee', 0) == 0))
+        && request.resource.data.totalPrice == request.resource.data.service.price + request.resource.data.get('tip', 0) + request.resource.data.get('homeServiceFee', 0)
+        && request.resource.data.pointsEarned == 0
+        && request.resource.data.payMethod in ['cash'];
+      allow update: if signedIn() && (
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+          && request.resource.data.updatedAt is number
+          && ((request.auth.uid == resource.data.customerUid
+              && request.resource.data.status == 'cancelled'
+              && resource.data.status in ['requested', 'confirmed'])
+            || (request.auth.uid == resource.data.barberId
+              && ((resource.data.status == 'requested' && request.resource.data.status in ['confirmed', 'rejected', 'cancelled'])
+                || (resource.data.status == 'confirmed' && request.resource.data.status in ['in_progress', 'cancelled'])
+                || (resource.data.status == 'in_progress' && request.resource.data.status == 'completed')))))
+        || (request.auth.uid == resource.data.customerUid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'customerLocation', 'customerLocationUpdatedAt', 'updatedAt'
+          ])
+          && request.resource.data.customerLocation.lat is number
+          && request.resource.data.customerLocation.lng is number
+          && request.resource.data.customerLocation.lat >= -90
+          && request.resource.data.customerLocation.lat <= 90
+          && request.resource.data.customerLocation.lng >= -180
+          && request.resource.data.customerLocation.lng <= 180)
+      );
+      allow delete: if false;
     }
 
     match /reviews/{reviewId} {
       allow read: if true;
-      allow create, update, delete: if true;
+      allow create: if signedIn() && request.resource.data.customerUid == request.auth.uid
+        && request.resource.data.barberId is string
+        && exists(/databases/$(database)/documents/barbers/$(request.resource.data.barberId))
+        && request.resource.data.bookingId == reviewId
+        && exists(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId))
+        && get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid == request.auth.uid
+        && get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId == request.resource.data.barberId
+        && get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.status == 'completed'
+        && request.resource.data.rating is number
+        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
+        && request.resource.data.keys().hasOnly([
+          'bookingId', 'barberId', 'customerUid', 'rating', 'comment', 'customerName', 'customerAvatar', 'createdAt'
+        ]);
+      allow update, delete: if false;
     }
 
     match /users/{userId} {
-      allow read: if true;
-      allow write: if true;
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow create: if signedIn() && request.auth.uid == userId
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role in ['customer', 'barber']
+        && request.resource.data.get('loyaltyPoints', 0) == 0
+        && request.resource.data.get('totalBookings', 0) == 0
+        && request.resource.data.keys().hasOnly([
+          'uid', 'name', 'phone', 'email', 'avatar', 'role', 'createdAt', 'fcmToken', 'referralCode', 'loyaltyPoints', 'totalBookings'
+        ]);
+      allow update: if signedIn() && request.auth.uid == userId
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name', 'phone', 'email', 'avatar', 'fcmToken'
+        ]);
+      allow delete: if false;
     }
 
     match /notifications/{nid} {
-      allow read, write: if true;
+      allow read: if signedIn() && resource.data.toUid == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.toUid is string
+        && request.resource.data.title is string && request.resource.data.title.size() <= 120
+        && request.resource.data.body is string && request.resource.data.body.size() <= 500
+        && ((request.resource.data.type == 'booking_request'
+            && exists(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId))
+            && get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid == request.auth.uid
+            && get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId == request.resource.data.toUid)
+          || (request.resource.data.type == 'booking_update'
+            && exists(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId))
+            && request.resource.data.toUid != request.auth.uid
+            && request.resource.data.toUid in [
+              get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid,
+              get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId
+            ]
+            && request.auth.uid in [
+              get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid,
+              get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId
+            ])
+          || (request.resource.data.type == 'message'
+            && bookingParticipant(request.resource.data.bookingId)
+            && request.resource.data.toUid != request.auth.uid
+            && request.resource.data.toUid in [
+              get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid,
+              get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId
+            ])
+          || (request.resource.data.type == 'new_post'
+            && exists(/databases/$(database)/documents/posts/$(request.resource.data.postId))
+            && get(/databases/$(database)/documents/posts/$(request.resource.data.postId)).data.ownerUid == request.auth.uid
+            && exists(/databases/$(database)/documents/follows/$(request.resource.data.toUid + '__' + request.auth.uid))));
+      allow update: if signedIn() && resource.data.toUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read is bool;
+      allow delete: if signedIn() && resource.data.toUid == request.auth.uid;
     }
 
     match /staff/{staffId} {
-      allow read: if true;
-      allow write: if true;
+      allow read: if signedIn() && (resource.data.salonOwnerId == request.auth.uid || resource.data.barberId == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.salonOwnerId == request.auth.uid
+        && request.resource.data.barberId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'barberId', 'salonOwnerId', 'name', 'specialties', 'avatar', 'workingHours',
+          'bookingsCount', 'completedCount', 'createdAt'
+        ]);
+      allow update: if signedIn() && resource.data.salonOwnerId == request.auth.uid
+        && request.resource.data.salonOwnerId == resource.data.salonOwnerId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name', 'specialties', 'avatar', 'workingHours'
+        ]);
+      allow delete: if signedIn() && resource.data.salonOwnerId == request.auth.uid;
     }
 
     match /payouts/{payoutId} {
-      allow read: if true;
-      allow write: if true;
+      allow read: if signedIn() && resource.data.barberId == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.barberId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.amount is number && request.resource.data.amount > 0
+        && request.resource.data.keys().hasOnly(['barberId', 'amount', 'status', 'method', 'note', 'createdAt']);
+      allow update, delete: if false;
     }
 
     match /checkins/{checkinId} {
-      allow read: if true;
-      allow write: if true;
+      allow read: if signedIn() && (resource.data.customerUid == request.auth.uid || resource.data.barberId == request.auth.uid);
+      allow create, update, delete: if false;
     }
 
-    match /messages/{msgId} {
-      allow read, write: if true;
+    match /messages/{bookingId} {
       match /msgs/{subMsgId} {
-        allow read, write: if true;
+        allow read: if bookingParticipant(bookingId);
+        allow create: if bookingParticipant(bookingId)
+          && request.resource.data.fromUid == request.auth.uid
+          && request.resource.data.bookingId == bookingId
+          && request.resource.data.toUid in [
+            get(/databases/$(database)/documents/bookings/$(bookingId)).data.customerUid,
+            get(/databases/$(database)/documents/bookings/$(bookingId)).data.barberId
+          ]
+          && request.resource.data.toUid != request.auth.uid;
+        allow update: if bookingParticipant(bookingId)
+          && request.auth.uid == resource.data.toUid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+          && resource.data.read == false && request.resource.data.read == true;
+        allow delete: if bookingParticipant(bookingId) && resource.data.fromUid == request.auth.uid;
       }
     }
 
     match /referrals/{refId} {
-      allow read, write: if true;
+      allow read: if signedIn() && (resource.data.inviterUid == request.auth.uid || resource.data.newUserUid == request.auth.uid);
+      allow write: if false;
     }
 
     match /follows/{followId} {
-      allow read, write: if true;
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.followerUid == request.auth.uid
+        && followId == request.auth.uid + '__' + request.resource.data.barberId
+        && exists(/databases/$(database)/documents/barbers/$(request.resource.data.barberId))
+        && request.resource.data.keys().hasOnly(['followerUid', 'barberId', 'barberName', 'barberAvatar', 'createdAt']);
+      allow delete: if signedIn() && resource.data.followerUid == request.auth.uid;
+      allow update: if false;
+    }
+
+    match /gallery/{imageId} {
+      allow read: if true;
+      allow create: if signedIn() && request.resource.data.barberId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['barberId', 'imageUrl', 'thumbnail', 'description', 'createdAt']);
+      allow update, delete: if signedIn() && resource.data.barberId == request.auth.uid;
     }
   }
 }

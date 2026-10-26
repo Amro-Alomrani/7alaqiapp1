@@ -16,9 +16,6 @@
         <domain includeSubdomains="true">basemaps.cartocdn.com</domain>
         <domain includeSubdomains="true">tile.openstreetmap.org</domain>
         <domain includeSubdomains="true">router.project-osrm.org</domain>
-        <!-- Avatars -->
-        <domain includeSubdomains="true">pravatar.cc</domain>
-        <domain includeSubdomains="true">ui-avatars.com</domain>
         <!-- Firebase Storage images -->
         <domain includeSubdomains="true">storage.googleapis.com</domain>
         <!-- Google Maps directions -->

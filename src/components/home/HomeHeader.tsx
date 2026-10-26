@@ -23,7 +23,7 @@ export default function HomeHeader() {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? (ar ? 'صباح الخير' : 'Good morning') : hour < 17 ? (ar ? 'مساء الخير' : 'Good afternoon') : (ar ? 'مساء الخير' : 'Good evening');
   const userName = customer?.name?.split(' ')[0] || (ar ? 'مستخدم' : 'User');
-  const userAvatar = customer?.avatar || `https://i.pravatar.cc/150?u=guest`;
+  const userAvatar = customer?.avatar || '/logo.png';
 
   return (
     <div className="flex items-center justify-between px-5 pt-14 pb-3">

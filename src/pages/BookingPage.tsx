@@ -1,6 +1,7 @@
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { ArrowLeft, Sparkles, Check, Calendar, Clock } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useSafeBack } from "@/hooks/useSafeBack";
+import { ArrowLeft, Check, Calendar, Clock } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { useBarber } from '@/contexts/DataContext';
@@ -11,34 +12,19 @@ import { Button } from '@/components/ui/button';
 import { useLiveBooking } from '@/contexts/LiveBookingContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 
-function generateTimeSlots() {
-  const slots: { id: string; time: string; available: boolean; aiRecommended: boolean }[] = [];
-  for (let hour = 9; hour <= 21; hour++) {
-    for (const m of [0, 30]) {
-      const time = `${hour.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-      slots.push({ id: `t${hour}${m}`, time, available: true, aiRecommended: hour === 14 || hour === 17 });
-    }
-  }
-  return slots;
+function localDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
-
-const DAYS_EN = ['Today', 'Tomorrow', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const DAYS_AR = ['اليوم', 'الغد', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد'];
-const DATES = Array.from({ length: 7 }, (_, i) => {
-  const d = new Date();
-  d.setDate(d.getDate() + i);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-});
 
 export default function BookingPage() {
   const { barberId } = useParams();
   const navigate = useNavigate();
+  const safeBack = useSafeBack();
   const location = useLocation();
   const { t, language } = useLanguage();
   const barber = useBarber(barberId);
   const { customer } = useAuth();
   const { createBooking } = useLiveBooking();
-  const DAYS = language === 'ar' ? DAYS_AR : DAYS_EN;
 
   const [step, setStep] = useState(0);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
@@ -47,9 +33,41 @@ export default function BookingPage() {
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [tip, setTip] = useState(0);
-  const [payMethod, setPayMethod] = useState<'cash' | 'wallet'>('cash');
-  const [selectedWalletLabel, setSelectedWalletLabel] = useState<string>('');
-  const slots = generateTimeSlots();
+  const [payMethod, setPayMethod] = useState<'cash'>('cash');
+  const dates = useMemo(() => Array.from({ length: 7 }, (_, i) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + i);
+    const locale = language === 'ar' ? 'ar-JO' : 'en-US';
+    return {
+      key: localDateKey(date),
+      day: date.toLocaleDateString(locale, { weekday: 'short' }),
+      label: date.toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' }),
+      weekdayKey: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()],
+    };
+  }), [language]);
+  const slots = useMemo(() => {
+    const hours = barber?.workingHours;
+    const date = dates[selectedDay];
+    if (!hours?.open || !hours.close || !hours.days?.includes(date?.weekdayKey)) return [];
+    const [openHour, openMinute] = hours.open.split(':').map(Number);
+    const [closeHour, closeMinute] = hours.close.split(':').map(Number);
+    const openAt = openHour * 60 + openMinute;
+    const closeAt = closeHour * 60 + closeMinute;
+    const duration = selectedService?.duration || 30;
+    if (![openAt, closeAt, duration].every(Number.isFinite) || closeAt <= openAt || duration < 1) return [];
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const slots: { id: string; time: string }[] = [];
+    for (let start = openAt; start + duration <= closeAt; start += 30) {
+      if (selectedDay === 0 && start <= currentMinutes) continue;
+      const hour = Math.floor(start / 60);
+      const minute = start % 60;
+      const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+      slots.push({ id: `t${time}`, time });
+    }
+    return slots;
+  }, [barber?.workingHours, dates, selectedDay, selectedService?.duration]);
   const tipOptions = [0, 5, 10, 15];
 
   useEffect(() => {
@@ -60,10 +78,12 @@ export default function BookingPage() {
 
     if (serviceId) {
       const s = (barber.services || []).find(x => x.id === serviceId);
+      // Firestore-backed barber data arrives after navigation; preselect its requested service when loaded.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (s) { setSelectedService(s); setStep(1); }
     }
-    if (staffId && (barber as any).staff) {
-      const s = ((barber as any).staff as any[]).find(x => x.id === staffId);
+    if (staffId && barber.staff) {
+      const s = barber.staff.find(x => x.id === staffId);
       if (s) setSelectedStaff({ id: s.id, name: s.name, avatar: s.avatar });
     }
 
@@ -81,14 +101,14 @@ export default function BookingPage() {
       }
     }
     if (state.suggestedDate) {
-      const idx = DAYS_EN.findIndex(d => d.toLowerCase() === state.suggestedDate!.toLowerCase());
+      const idx = dates.findIndex(d => d.key === state.suggestedDate || d.day.toLowerCase() === state.suggestedDate!.toLowerCase());
       if (idx >= 0) setSelectedDay(idx);
     }
     if (state.suggestedTime) {
-      const slot = slots.find(s => s.time === state.suggestedTime && s.available);
+      const slot = slots.find(s => s.time === state.suggestedTime);
       if (slot) setSelectedTime(slot.time);
     }
-  }, [barber?.id]);
+  }, [barber, dates, location.search, location.state, slots]);
 
   if (!barber) return null;
 
@@ -96,20 +116,15 @@ export default function BookingPage() {
     if (!selectedService || !selectedTime || loading) return;
     setLoading(true);
     try {
-      const customerLocation = await (async () => {
-        if (!navigator.geolocation) return undefined;
-        try {
-          const pos = await new Promise<GeolocationPosition>((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, {timeout: 3000}));
-          return { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        } catch { return undefined; }
-      })();
+      if (!customer) {
+        toast.error(language === 'ar' ? 'سجّل الدخول لإتمام الحجز' : 'Sign in to complete your booking');
+        setLoading(false);
+        return;
+      }
 
-      let firestoreId: string | undefined;
-      if (customer) {
-        try {
-          firestoreId = await createFirestoreBooking({
+      const firestoreId = await createFirestoreBooking({
             customerUid: customer.uid,
-            customerName: customer.name || 'Customer',
+            customerName: customer.name || '',
             customerPhone: customer.phone || '',
             customerAvatar: customer.avatar,
             barberId: barber.id,
@@ -120,38 +135,28 @@ export default function BookingPage() {
             staffName: selectedStaff?.name,
             staffAvatar: selectedStaff?.avatar,
             service: selectedService,
-            date: DATES[selectedDay],
+            date: dates[selectedDay].key,
             time: selectedTime,
             totalPrice: selectedService.price + tip,
-            pointsEarned: Math.round(selectedService.price * 2),
+            pointsEarned: 0,
           });
-        } catch {
-        }
-      }
 
       createBooking(
         barber.id,
         barber.id,
         selectedService,
-        DATES[selectedDay],
+        dates[selectedDay].key,
         selectedTime,
         tip,
         payMethod,
-        customerLocation,
+        undefined,
         firestoreId
       );
 
-      try {
-        if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-          await Notification.requestPermission();
-        }
-      } catch {  }
-
       toast.success(t.booking.success, { description: t.booking.successDesc });
-      await new Promise(r => setTimeout(r, 600));
       navigate('/booking-status');
     } catch (err) {
-      toast.error(t.common.error);
+      toast.error(t.common.error, { description: err instanceof Error ? err.message : undefined });
       setLoading(false);
     }
   };
@@ -159,7 +164,7 @@ export default function BookingPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <div className="flex items-center gap-4 px-5 pt-14 pb-4">
-        <button onClick={() => step > 0 ? setStep(s => s - 1) : navigate(-1)}
+        <button onClick={() => step > 0 ? setStep(s => s - 1) : safeBack()}
           className="w-10 h-10 bg-card border border-border rounded-full flex items-center justify-center">
           <ArrowLeft size={18} />
         </button>
@@ -210,40 +215,37 @@ export default function BookingPage() {
           {step === 1 && (
             <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <h2 className="text-lg font-bold mb-1">{t.booking.pickDateTime}</h2>
-              <div className="flex items-center gap-2 mb-4 bg-primary/10 border border-primary/20 rounded-xl px-3 py-2">
-                <Sparkles size={14} className="text-primary" />
-                <p className="text-xs text-primary font-medium">{t.booking.aiSuggestion}</p>
-              </div>
+              <p className="text-xs text-muted-foreground mb-4">
+                {language === 'ar'
+                  ? 'هذه أوقات طلب حسب دوام الصالون. الحلاق يؤكد الموعد بعد مراجعة الطلب.'
+                  : 'These are request times based on the salon hours. The barber confirms after reviewing your request.'}
+              </p>
               <h3 className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-2"><Calendar size={14} />{t.booking.selectDay}</h3>
               <div className="flex gap-2 overflow-x-auto pb-2 mb-5">
-                {DAYS.map((d, i) => (
-                  <button key={d} onClick={() => setSelectedDay(i)}
+                {dates.map((d, i) => (
+                  <button key={d.key} onClick={() => setSelectedDay(i)}
                     className={`flex-shrink-0 flex flex-col items-center px-4 py-2.5 rounded-xl border-2 transition-all ${selectedDay === i ? 'border-primary bg-primary/10' : 'border-border bg-card'}`}>
-                    <span className={`text-xs font-medium ${selectedDay === i ? 'text-primary' : 'text-muted-foreground'}`}>{d}</span>
-                    <span className={`text-sm font-bold mt-0.5 ${selectedDay === i ? 'text-primary' : 'text-foreground'}`}>{DATES[i].split(' ')[1]}</span>
+                    <span className={`text-xs font-medium ${selectedDay === i ? 'text-primary' : 'text-muted-foreground'}`}>{d.day}</span>
+                    <span className={`text-sm font-bold mt-0.5 ${selectedDay === i ? 'text-primary' : 'text-foreground'}`}>{d.label}</span>
                   </button>
                 ))}
               </div>
               <h3 className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-2"><Clock size={14} />{t.booking.selectTime}</h3>
               <div className="grid grid-cols-3 gap-2">
+                {slots.length === 0 && (
+                  <p className="col-span-3 rounded-xl border border-border bg-card p-4 text-center text-xs text-muted-foreground">
+                    {language === 'ar'
+                      ? 'لا توجد ساعات عمل مسجلة لهذا اليوم، لذلك لا يمكن عرض وقت طلب.'
+                      : 'No working hours are recorded for this day, so no request times can be shown.'}
+                  </p>
+                )}
                 {slots.map(slot => (
                   <button
                     key={slot.id}
-                    disabled={!slot.available}
                     onClick={() => setSelectedTime(slot.time)}
-                    className={`relative py-2.5 rounded-xl border-2 text-xs font-semibold transition-all ${
-                      !slot.available ? 'border-border bg-secondary/30 text-muted-foreground/40 line-through cursor-not-allowed'
-                      : selectedTime === slot.time ? 'border-primary bg-primary text-primary-foreground'
-                      : slot.aiRecommended ? 'border-primary/40 bg-primary/5 text-foreground'
-                      : 'border-border bg-card text-foreground'
-                    }`}
+                    className={`py-2.5 rounded-xl border-2 text-xs font-semibold transition-all ${selectedTime === slot.time ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-foreground'}`}
                   >
                     {slot.time}
-                    {slot.aiRecommended && slot.available && selectedTime !== slot.time && (
-                      <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-primary rounded-full flex items-center justify-center">
-                        <Sparkles size={8} className="text-primary-foreground" />
-                      </span>
-                    )}
                   </button>
                 ))}
               </div>
@@ -265,7 +267,7 @@ export default function BookingPage() {
                   {[
                     { label: t.booking.service, value: `${selectedService?.icon} ${selectedService?.name}` },
                     { label: t.booking.duration, value: `${selectedService?.duration} ${t.booking.min}` },
-                    { label: t.booking.date, value: `${DAYS[selectedDay]}, ${DATES[selectedDay]}` },
+                    { label: t.booking.date, value: `${dates[selectedDay].day}, ${dates[selectedDay].label}` },
                     { label: t.booking.time, value: selectedTime || '' },
                     { label: t.booking.address, value: barber.address },
                   ].map(({ label, value }) => (
@@ -285,13 +287,10 @@ export default function BookingPage() {
                 <div className="grid grid-cols-2 gap-2">
                   {([
                     { key: 'cash' as const, label: t.booking.cash, icon: '💵' },
-                    { key: 'wallet' as const, label: 'Zain Cash', icon: '📱' },
-                    { key: 'wallet' as const, label: 'Orange Money', icon: '🟠' },
-                    { key: 'wallet' as const, label: 'eFAWATEERcom', icon: '🏦' },
                   ]).map((m, idx) => {
-                    const active = payMethod === m.key && (m.key === 'cash' ? idx === 0 : selectedWalletLabel === m.label);
+                    const active = payMethod === m.key && idx === 0;
                     return (
-                      <button key={m.label} onClick={() => { setPayMethod(m.key); if (m.key === 'wallet') setSelectedWalletLabel(m.label); else setSelectedWalletLabel(''); }}
+                      <button key={m.label} onClick={() => setPayMethod('cash')}
                         className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-all ${active ? 'border-primary bg-primary/10' : 'border-border bg-secondary'}`}>
                         <span className="text-base">{m.icon}</span>
                         <span className={`text-xs font-semibold flex-1 text-left ${active ? 'text-primary' : 'text-muted-foreground'}`}>{m.label}</span>

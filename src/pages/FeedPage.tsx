@@ -7,7 +7,7 @@ import { usePosts, useBarbers } from '@/contexts/DataContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { createPost } from '@/lib/db';
-import { uploadImage } from '@/lib/storage';
+import { describeImageUploadError, uploadImage } from '@/lib/storage';
 import { toast } from 'sonner';
 
 type Tab = 'looks' | 'barbers' | 'trending';
@@ -36,8 +36,8 @@ function PostCreationSheet({
     try {
       const url = await uploadImage(file, `posts/${customer.uid}/${Date.now()}.jpg`);
       setImage(url);
-    } catch {
-      toast.error(ar ? 'فشل رفع الصورة' : 'Upload failed');
+    } catch (error) {
+      toast.error(ar ? 'فشل رفع الصورة' : 'Upload failed', { description: describeImageUploadError(error, ar) });
     } finally {
       setUploading(false);
       e.target.value = '';
@@ -81,14 +81,14 @@ function PostCreationSheet({
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end justify-center p-4 pb-8"
+      className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
       onClick={onClose}
     >
       <motion.div
         initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 28, stiffness: 300 }}
         onClick={e => e.stopPropagation()}
-        className="w-full max-w-sm bg-background border border-border rounded-3xl p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+        className="w-full max-w-sm bg-background border border-border rounded-3xl p-5 sm:p-6 space-y-4 max-h-[calc(100dvh-1.5rem)] overflow-y-auto overscroll-contain"
         dir={ar ? 'rtl' : 'ltr'}
       >
         <div className="flex items-center justify-between">
@@ -185,14 +185,14 @@ function PostDetailModal({
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end justify-center"
+      className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
       onClick={onClose}
     >
       <motion.div
         initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 28, stiffness: 300 }}
         onClick={e => e.stopPropagation()}
-        className="w-full max-w-sm bg-background border border-border rounded-t-3xl overflow-hidden max-h-[90vh] flex flex-col"
+        className="w-full max-w-sm bg-background border border-border rounded-3xl overflow-hidden max-h-[calc(100dvh-1.5rem)] flex flex-col"
         dir={ar ? 'rtl' : 'ltr'}
       >
         <div className="flex items-center justify-between px-5 pt-5 pb-3">

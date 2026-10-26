@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { MapPin, Phone, Gift, ChevronRight, LogOut, Heart, Bell, Settings, Calendar, Sparkles, Brain, Users, MessageSquare, Languages, Sun, Moon, QrCode, Copy, Check, Camera, Loader2 } from 'lucide-react';
+import { MapPin, Phone, Gift, ChevronRight, LogOut, Trash2, Heart, Bell, Settings, Calendar, Brain, Users, MessageSquare, Languages, Sun, Moon, QrCode, Camera, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
@@ -10,9 +10,9 @@ import { useLiveBooking } from '@/contexts/LiveBookingContext';
 import { favPrefs, notifPrefs } from '@/lib/userPrefs';
 import { toast } from 'sonner';
 import { getUser, upsertUser } from '@/lib/db';
-import { uploadImage } from '@/lib/storage';
+import { describeImageUploadError, uploadImage } from '@/lib/storage';
 
-type Tab = 'profile' | 'dna' | 'history';
+type Tab = 'profile' | 'styles' | 'history';
 
 export default function ProfilePage() {
   const navigate = useNavigate();
@@ -34,19 +34,18 @@ export default function ProfilePage() {
   }, []);
 
   const totalBookings = allBookings.filter(b => b.status === 'completed').length;
-  const [loyaltyPoints, setLoyaltyPoints] = useState(0);
+  const [loyaltyPoints, setLoyaltyPoints] = useState<number | null>(null);
   const [realReferralCode, setRealReferralCode] = useState('');
   const [referralCount, setReferralCount] = useState(0);
 
   useEffect(() => {
     if (!customer?.uid) return;
     getUser(customer.uid).then(u => {
-      if (u?.loyaltyPoints != null) setLoyaltyPoints(u.loyaltyPoints);
-      else setLoyaltyPoints(totalBookings * 30);
+      setLoyaltyPoints(u ? (u.loyaltyPoints ?? 0) : null);
       if (u?.referralCode) setRealReferralCode(u.referralCode);
-      if (u?.referralCount) setReferralCount(u.referralCount);
-    }).catch(() => setLoyaltyPoints(totalBookings * 30));
-  }, [customer?.uid, totalBookings]);
+      setReferralCount(u?.referralCount ?? 0);
+    }).catch(() => setLoyaltyPoints(null));
+  }, [customer?.uid]);
 
   const activeNotifs = allBookings.filter(b =>
     !['requested', 'cancelled', 'rejected'].includes(b.status)
@@ -55,23 +54,12 @@ export default function ProfilePage() {
 
   const userName = customer?.name || (ar ? 'مستخدم' : 'User');
   const userPhone = customer?.phone || '';
-  const userAvatar = customer?.avatar || `https://i.pravatar.cc/150?u=${encodeURIComponent(userPhone || 'guest')}`;
+  const userAvatar = customer?.avatar || '';
 
-  const nextRewardAt = 500;
-  const progress = Math.min((loyaltyPoints / nextRewardAt) * 100, 100);
-
-  const REWARDS = [
-    { points: 100, label: ar ? 'خصم 10%' : '10% discount', icon: '💸' },
-    { points: 250, label: ar ? 'تشذيب لحية مجاني' : 'Free beard trim', icon: '🪒' },
-    { points: 500, label: ar ? 'حلاقة مجانية' : 'Free haircut', icon: '✂️' },
-    { points: 1000, label: ar ? 'عضوية VIP' : 'VIP membership', icon: '👑' },
-  ];
-
-  const referralCode = realReferralCode || (customer
-    ? `${((customer.name || '').split(' ')[0] || 'USER').toUpperCase()}-2026`
-    : 'GUEST-2026');
+  const referralCode = realReferralCode;
   const [copied, setCopied] = useState(false);
   const copy = () => {
+    if (!referralCode) return;
     navigator.clipboard?.writeText(referralCode).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -88,8 +76,8 @@ export default function ProfilePage() {
       updateCustomerAvatar(url);
       await upsertUser(customer.uid, { avatar: url });
       toast.success(ar ? 'تم تحديث الصورة ✅' : 'Photo updated ✅');
-    } catch {
-      toast.error(ar ? 'فشل رفع الصورة' : 'Upload failed');
+    } catch (error) {
+      toast.error(ar ? 'فشل رفع الصورة' : 'Upload failed', { description: describeImageUploadError(error, ar) });
     } finally {
       setAvatarUploading(false);
       e.target.value = '';
@@ -115,9 +103,10 @@ export default function ProfilePage() {
             <button
               onClick={() => avatarInputRef.current?.click()}
               disabled={avatarUploading}
-              className="w-20 h-20 rounded-2xl overflow-hidden border-2 border-primary relative group"
+              className="w-20 h-20 rounded-2xl overflow-hidden border-2 border-primary relative group bg-card"
             >
-              <img src={userAvatar} alt={userName} className="w-full h-full object-cover" />
+              <span className="absolute inset-0 flex items-center justify-center text-2xl font-black text-primary">{userName.trim().charAt(0).toUpperCase() || '؟'}</span>
+              {userAvatar && <img src={userAvatar} alt={userName} onError={event => { event.currentTarget.style.display = 'none'; }} className="absolute inset-0 w-full h-full object-cover" />}
               <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
                 {avatarUploading ? <Loader2 size={18} className="text-white animate-spin" /> : <Camera size={18} className="text-white" />}
               </div>
@@ -136,7 +125,7 @@ export default function ProfilePage() {
             )}
             <div className="flex items-center gap-1.5 mt-0.5">
               <MapPin size={11} className="text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">{ar ? 'عمّان، الأردن' : 'Amman, Jordan'}</span>
+              <span className="text-xs text-muted-foreground">{ar ? 'الموقع غير مضاف' : 'Location not added'}</span>
             </div>
           </div>
         </motion.div>
@@ -159,7 +148,7 @@ export default function ProfilePage() {
         <div className="flex gap-1 bg-secondary rounded-xl p-1">
           {([
             { id: 'profile', label: t.profile.tabLoyalty, icon: Gift },
-            { id: 'dna', label: t.profile.tabDna, icon: Brain },
+            { id: 'styles', label: t.profile.tabDna, icon: Brain },
             { id: 'history', label: t.profile.tabHistory, icon: Calendar },
           ] as const).map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setActiveTab(id as Tab)}
@@ -179,36 +168,11 @@ export default function ProfilePage() {
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <p className="text-primary-foreground/70 text-xs font-medium uppercase tracking-wider">{t.profile.loyaltyPoints}</p>
-                  <p className="text-4xl font-black text-primary-foreground">{loyaltyPoints}</p>
+                  <p className="text-4xl font-black text-primary-foreground">{loyaltyPoints ?? '—'}</p>
                 </div>
                 <Gift size={36} className="text-primary-foreground/30" />
               </div>
-              <div className="mb-1.5 flex justify-between">
-                <span className="text-xs text-primary-foreground/70">{t.profile.nextRewardAt}</span>
-                <span className="text-xs font-bold text-primary-foreground">{loyaltyPoints}/{nextRewardAt}</span>
-              </div>
-              <div className="h-2 bg-primary-foreground/20 rounded-full overflow-hidden">
-                <div className="h-full bg-primary-foreground rounded-full" style={{ width: `${progress}%` }} />
-              </div>
               <div className="absolute -end-6 -top-6 w-24 h-24 rounded-full bg-white/10" />
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              {REWARDS.map(r => {
-                const unlocked = loyaltyPoints >= r.points;
-                return (
-                  <div key={r.label}
-                    className={`bg-card border rounded-2xl p-3 flex items-center gap-2.5 ${unlocked ? 'border-primary/30' : 'border-border opacity-60'}`}>
-                    <span className="text-2xl">{r.icon}</span>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-foreground truncate">{r.label}</p>
-                      <p className={`text-[10px] mt-0.5 ${unlocked ? 'text-primary font-medium' : 'text-muted-foreground'}`}>
-                        {unlocked ? t.profile.unlocked : `${r.points} ${ar ? 'نقطة' : 'pts'}`}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
             </div>
 
             <div className="bg-card border border-border rounded-2xl p-5 mt-4">
@@ -220,8 +184,8 @@ export default function ProfilePage() {
                 </div>
               </div>
               <div className="flex items-center gap-2 bg-primary/10 border border-primary/20 rounded-xl px-4 py-3">
-                <span className="font-black text-primary tracking-wider flex-1" dir="ltr">{referralCode}</span>
-                <button onClick={copy} className="text-xs font-bold text-primary bg-primary/20 px-3 py-1.5 rounded-lg">
+                <span className="font-black text-primary tracking-wider flex-1" dir="ltr">{referralCode || '—'}</span>
+                <button onClick={copy} disabled={!referralCode} className="text-xs font-bold text-primary bg-primary/20 px-3 py-1.5 rounded-lg disabled:opacity-50">
                   {copied ? t.profile.copied : t.profile.copy}
                 </button>
               </div>
@@ -241,18 +205,18 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {activeTab === 'dna' && (
+        {activeTab === 'styles' && (
           <div className="bg-card border border-primary/20 rounded-2xl p-6 text-center mt-2">
             <Brain size={32} className="text-primary mx-auto mb-2" />
             <p className="font-bold text-foreground">{t.profile.styleIdentity}</p>
             <p className="text-xs text-muted-foreground mt-1">
               {ar
-                ? 'احجز قصّتك الأولى ليبني الذكاء هويتك الخاصة'
-                : 'Book your first cut so the AI can build your style profile'}
+                ? 'تصفّح أفكار القصّات العامة. لا ينشئ التطبيق حاليًا ملف تفضيلات أو توصيات شخصية.'
+                : 'Browse general haircut ideas. The app does not currently build a personal style profile or recommendations.'}
             </p>
-            <button onClick={() => navigate('/explore')}
+            <button onClick={() => navigate('/styles')}
               className="mt-4 bg-primary text-primary-foreground rounded-2xl px-5 py-2.5 text-sm font-bold">
-              {ar ? 'اختر حلاق' : 'Find a barber'}
+              {ar ? 'عرض أفكار الستايل' : 'Browse style ideas'}
             </button>
           </div>
         )}
@@ -291,6 +255,9 @@ export default function ProfilePage() {
           className="w-full h-12 rounded-2xl text-destructive border-destructive/20 gap-2">
           <LogOut size={16} />{t.profile.signOut}
         </Button>
+        <button onClick={() => navigate('/delete-account')} className="mt-4 flex w-full items-center justify-center gap-2 py-2 text-xs font-semibold text-destructive/80">
+          <Trash2 size={14} />{ar ? 'طلب حذف الحساب والبيانات' : 'Request account and data deletion'}
+        </button>
       </div>
     </div>
   );

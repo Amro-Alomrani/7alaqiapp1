@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { useSafeBack } from "@/hooks/useSafeBack";
 import { ArrowLeft, Download, Share2, QrCode } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -10,6 +11,7 @@ import { toast } from 'sonner';
 
 export default function BarberQRPage() {
   const navigate = useNavigate();
+  const safeBack = useSafeBack();
   const { barberUser } = useAuth();
   const { language } = useLanguage();
   const ar = language === 'ar';
@@ -80,7 +82,7 @@ export default function BarberQRPage() {
     <div className="min-h-screen bg-background pb-10">
       <div className="flex items-center gap-3 px-5 pt-14 pb-4">
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => safeBack()}
           className="w-10 h-10 bg-card border border-border rounded-full flex items-center justify-center"
         >
           <ArrowLeft size={18} />

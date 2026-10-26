@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSafeBack } from "@/hooks/useSafeBack";
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Plus, Users, Loader2, Star, Check, Camera, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -6,10 +7,11 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { addStaffMember, deleteStaffMember, subscribeStaff, type StaffDoc } from '@/lib/db';
-import { pickImage, uploadImage } from '@/lib/storage';
+import { describeImageUploadError, pickImage, uploadImage } from '@/lib/storage';
 
 export default function BarberStaffPage() {
   const navigate = useNavigate();
+  const safeBack = useSafeBack();
   const { barberUser } = useAuth();
   const { language } = useLanguage();
   const ar = language === 'ar';
@@ -57,7 +59,9 @@ export default function BarberStaffPage() {
       setAvatarPreview('');
       toast.success(ar ? 'تم إضافة موظف جديد' : 'Staff member added');
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to add staff');
+      toast.error(ar ? 'فشل إضافة الموظف' : 'Failed to add staff', {
+        description: avatarFile ? describeImageUploadError(e, ar) : (e?.message || undefined),
+      });
     } finally {
       setLoading(false);
     }
@@ -76,7 +80,7 @@ export default function BarberStaffPage() {
   return (
     <div className="min-h-screen bg-background flex flex-col pb-20" dir={ar ? 'rtl' : 'ltr'}>
       <div className="sticky top-0 z-30 bg-background/80 backdrop-blur-sm border-b border-border px-5 pt-12 pb-4 flex items-center justify-between">
-        <button onClick={() => navigate(-1)} className="w-10 h-10 bg-card border border-border rounded-xl flex items-center justify-center">
+        <button onClick={() => safeBack()} className="w-10 h-10 bg-card border border-border rounded-xl flex items-center justify-center">
           <ChevronLeft size={20} className={`text-foreground ${ar ? 'rotate-180' : ''}`} />
         </button>
         <h1 className="text-xl font-black text-foreground">{ar ? 'فريق العمل' : 'Staff Management'}</h1>

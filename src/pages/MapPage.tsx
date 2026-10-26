@@ -1,11 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
+import { useSafeBack } from "@/hooks/useSafeBack";
+import { MapContainer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import { useNavigate } from 'react-router-dom';
 import L from 'leaflet';
+import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, Navigation, Star, Clock, Locate, X, Scissors, Users, Loader2, LocateOff } from 'lucide-react';
-import { useBarbers } from '@/contexts/DataContext';
+import { useData } from '@/contexts/DataContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { toast } from 'sonner';
+import { watchDeviceLocation } from '@/lib/location';
+import MapTileLayer from '@/components/maps/MapTileLayer';
 import 'leaflet/dist/leaflet.css';
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -22,14 +26,22 @@ const ME_ICON = L.divIcon({
   iconAnchor: [10, 10],
 });
 
+const MANUAL_LOCATION_ICON = L.divIcon({
+  className: '',
+  html: `<div style="width:20px;height:20px;background:#f59e0b;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(245,158,11,0.55);"></div>`,
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+});
+
 function barberPhotoIcon(avatar: string, shopName: string, status: string, selected: boolean) {
   const statusRing: Record<string, string> = {
     available: '#10b981',
     finishing_soon: '#f59e0b',
     busy: '#ef4444',
+    closed: '#9ca3af',
     offline: '#9ca3af',
   };
-  const ring = statusRing[status] || '#10b981';
+  const ring = statusRing[status] || '#9ca3af';
   const size = selected ? 52 : 44;
   const shadow = selected ? `0 0 0 3px hsl(38 92% 52%)` : `0 2px 6px rgba(0,0,0,0.25)`;
   const initial = (shopName?.[0] || '✂').toUpperCase();
@@ -64,75 +76,131 @@ function FlyToUser({ pos }: { pos: [number, number] | null }) {
   return null;
 }
 
+function MapLocationPicker({ enabled, onPick }: { enabled: boolean; onPick: (position: [number, number]) => void }) {
+  useMapEvents({
+    click(event) {
+      if (enabled) onPick([event.latlng.lat, event.latlng.lng]);
+    },
+  });
+  return null;
+}
+
 type Filter = 'all' | 'available' | 'nearby';
 
 export default function MapPage() {
   const navigate = useNavigate();
-  const allBarbers = useBarbers();
+  const safeBack = useSafeBack();
+  const { barbers: allBarbers, loadingBarbers, barbersError } = useData();
   const { language } = useLanguage();
   const ar = language === 'ar';
 
   const [userLoc, setUserLoc] = useState<[number, number] | null>(null);
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [manualPickMode, setManualPickMode] = useState(false);
+  const [locationSource, setLocationSource] = useState<'device' | 'manual' | null>(null);
   const [flyToUser, setFlyToUser] = useState<[number, number] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [routeInfo, setRouteInfo] = useState<{ distKm: number; etaMin: number } | null>(null);
-  const watchRef = useRef<number | null>(null);
+  const watchRef = useRef<(() => void) | null>(null);
+  const locationRequestRef = useRef(0);
+  const centeredOnUserRef = useRef(false);
+  const hasLocationFixRef = useRef(false);
 
   const stopWatch = useCallback(() => {
+    locationRequestRef.current++;
     if (watchRef.current !== null) {
-      navigator.geolocation.clearWatch(watchRef.current);
+      watchRef.current();
       watchRef.current = null;
     }
   }, []);
 
   const startLocation = useCallback(() => {
-    if (!navigator.geolocation) {
-      toast.error(ar ? 'الجهاز لا يدعم GPS' : 'GPS not supported');
-      return;
-    }
+    setLocationError(null);
     setLocationLoading(true);
     stopWatch();
-
-    watchRef.current = navigator.geolocation.watchPosition(
-      pos => {
-        const p: [number, number] = [pos.coords.latitude, pos.coords.longitude];
-        setUserLoc(p);
-        setLocationEnabled(true);
-        setLocationLoading(false);
-        setFlyToUser(prev => prev ? null : p);
-      },
-      err => {
-        setLocationLoading(false);
-        setLocationEnabled(false);
-        toast.error(
-          err.code === 1
-            ? (ar ? 'فعّل إذن الموقع من الإعدادات' : 'Enable location permission')
-            : (ar ? 'تعذّر تحديد الموقع' : 'Failed to get location')
-        );
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
-    );
+    const requestId = locationRequestRef.current;
+    let errorNotified = false;
+    const onPosition = (pos: { coords: { latitude: number; longitude: number } }) => {
+      if (requestId !== locationRequestRef.current) return;
+      const p: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+      if (!p.every(Number.isFinite)) return;
+      hasLocationFixRef.current = true;
+      setUserLoc(p);
+      setLocationSource('device');
+      setLocationError(null);
+      setLocationEnabled(true);
+      setLocationLoading(false);
+      if (!centeredOnUserRef.current) {
+        centeredOnUserRef.current = true;
+        setFlyToUser(p);
+      }
+      };
+    const onError = (err: { code: number; message: string }) => {
+      if (requestId !== locationRequestRef.current) return;
+      setLocationLoading(false);
+      if (!hasLocationFixRef.current) setLocationEnabled(false);
+      const message = ar ? 'تعذر تحديد موقعك الآن. حاول مرة أخرى.' : 'Could not determine your location. Try again.';
+      setLocationError(message);
+      if (!errorNotified) {
+        errorNotified = true;
+        toast.error(message);
+      }
+      };
+    // Like the previous working map, keep watchPosition active while it waits
+    // for the first fix; getCurrentPosition can time out before GPS wakes up.
+    void watchDeviceLocation(onPosition, onError, { enableHighAccuracy: true, timeout: 30000, maximumAge: Capacitor.isNativePlatform() ? 15000 : 60000 })
+      .then(stop => {
+        if (requestId === locationRequestRef.current) watchRef.current = stop;
+        else stop();
+      })
+      .catch(onError);
   }, [ar, stopWatch]);
 
   const toggleLocation = useCallback(() => {
-    if (locationEnabled || locationLoading) {
+    if (locationLoading) return;
+    if (locationEnabled) {
       stopWatch();
       setLocationEnabled(false);
       setLocationLoading(false);
       setUserLoc(null);
+      setLocationSource(null);
+      setManualPickMode(false);
+      hasLocationFixRef.current = false;
+      setLocationError(null);
       setFlyToUser(null);
+      centeredOnUserRef.current = false;
       setRouteInfo(null);
     } else {
       startLocation();
     }
   }, [locationEnabled, locationLoading, startLocation, stopWatch]);
 
-  useEffect(() => () => stopWatch(), [stopWatch]);
+  useEffect(() => {
+    startLocation();
+    return () => stopWatch();
+  }, [startLocation, stopWatch]);
 
-  const barbersWithCoords = allBarbers.filter(b => b.lat && b.lng && (b.services?.length || 0) > 0 && b.onboardingComplete === true);
+  const pickMapLocation = useCallback((position: [number, number]) => {
+    stopWatch();
+    setUserLoc(position);
+    setLocationSource('manual');
+    setLocationEnabled(true);
+    setLocationError(null);
+    setManualPickMode(false);
+    setFlyToUser(position);
+    centeredOnUserRef.current = true;
+  }, [stopWatch]);
+
+  const barbersWithCoords = allBarbers.flatMap(b => {
+    const lat = b.lat == null ? NaN : Number(b.lat);
+    const lng = b.lng == null ? NaN : Number(b.lng);
+    return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
+      ? [{ ...b, lat, lng }]
+      : [];
+  });
 
   const filtered = barbersWithCoords.filter(b => {
     if (filter === 'available') return b.liveStatus === 'available';
@@ -149,34 +217,29 @@ export default function MapPage() {
   useEffect(() => {
     if (!selectedBarber || !userLoc) { setRouteInfo(null); return; }
     const { lat, lng } = selectedBarber;
-    if (!lat || !lng) return;
+    if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
     fetch(`https://router.project-osrm.org/route/v1/driving/${userLoc[1]},${userLoc[0]};${lng},${lat}?overview=false`)
       .then(r => r.json())
       .then(d => {
         const r = d.routes?.[0];
         if (r) setRouteInfo({ distKm: r.distance / 1000, etaMin: Math.round(r.duration / 60) });
       })
-      .catch(() => {
-        if (userLoc && lat && lng) {
-          const dx = (lat - userLoc[0]) * 111;
-          const dy = (lng - userLoc[1]) * 111;
-          setRouteInfo({ distKm: Math.sqrt(dx * dx + dy * dy), etaMin: Math.round(Math.sqrt(dx * dx + dy * dy) / 0.5) });
-        }
-      });
+      .catch(() => setRouteInfo(null));
   }, [selectedBarber?.id, userLoc]);
 
   const statusLabel = (s: string) => ({
     available: ar ? 'متاح ✅' : 'Available ✅',
     finishing_soon: ar ? 'ينتهي قريباً 🟡' : 'Finishing soon 🟡',
     busy: ar ? 'مشغول 🔴' : 'Busy 🔴',
+    closed: ar ? 'مغلق ⚫' : 'Closed ⚫',
     offline: ar ? 'مغلق ⚫' : 'Closed ⚫',
-  }[s] || (ar ? 'متاح' : 'Available'));
+  }[s] || (ar ? 'الحالة غير محددة' : 'Status unavailable'));
 
   return (
     <div className="fixed inset-0 bg-background">
       <div className="absolute top-0 left-0 right-0 z-[1000] px-4 pt-12 pb-3">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} style={{ touchAction: 'manipulation' }}
+          <button onClick={() => safeBack()} style={{ touchAction: 'manipulation' }}
             className="w-10 h-10 bg-background border border-border rounded-full flex items-center justify-center shadow-md">
             <ArrowLeft size={18} className="text-foreground" />
           </button>
@@ -211,7 +274,7 @@ export default function MapPage() {
             )}
             <span className="text-[8px] font-black leading-none mt-0.5"
               style={{ color: locationEnabled ? '#fff' : 'hsl(var(--muted-foreground))' }}>
-              {locationLoading ? '...' : locationEnabled ? (ar ? 'مشغّل' : 'ON') : (ar ? 'موقع' : 'OFF')}
+              {locationLoading ? '...' : locationSource === 'manual' ? (ar ? 'يدوي' : 'PIN') : locationEnabled ? (ar ? 'مشغّل' : 'ON') : (ar ? 'موقع' : 'OFF')}
             </span>
           </button>
         </div>
@@ -241,29 +304,56 @@ export default function MapPage() {
         </div>
       </div>
 
+      {locationError && !userLoc && (
+        <div className="absolute top-32 left-4 right-4 z-[1000] rounded-2xl border border-destructive/30 bg-background/95 p-3 shadow-lg backdrop-blur-sm">
+          <p className="text-xs font-semibold text-foreground">{locationError}</p>
+          <p className="mt-1 text-[10px] text-muted-foreground">{ar ? 'تبدأ الخريطة من عمّان افتراضياً؛ هذا ليس موقع جهازك.' : 'The map starts at Amman by default; this is not your device location.'}</p>
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={startLocation}
+              className="rounded-xl bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground"
+            >
+              {ar ? 'إعادة تحديد الموقع' : 'Retry location'}
+            </button>
+            <button
+              onClick={() => { setLocationError(null); setManualPickMode(true); }}
+              className="rounded-xl border border-border px-3 py-1.5 text-xs font-bold text-foreground"
+            >
+              {ar ? 'اختيار الموقع على الخريطة' : 'Choose on map'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {manualPickMode && (
+        <div className="absolute top-32 left-4 right-4 z-[1000] rounded-2xl border border-primary/30 bg-background/95 p-3 text-center shadow-lg backdrop-blur-sm">
+          <p className="text-xs font-semibold text-foreground">
+            {ar ? 'اضغط على موقعك في الخريطة. هذا موقع تختاره يدوياً وليس قراءة GPS.' : 'Tap your location on the map. This is a manual pin, not a GPS reading.'}
+          </p>
+          <button onClick={() => setManualPickMode(false)} className="mt-2 text-xs font-bold text-muted-foreground">
+            {ar ? 'إلغاء' : 'Cancel'}
+          </button>
+        </div>
+      )}
+
       <MapContainer
         center={userLoc || [31.9539, 35.9106]}
         zoom={13}
         scrollWheelZoom
         style={{ position: 'absolute', inset: 0, zIndex: 0, width: '100%', height: '100%' }}
-        attributionControl={false}
+        attributionControl
         zoomControl={false}
       >
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-          attribution=""
-          errorTileUrl="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-          maxZoom={19}
-          keepBuffer={4}
-        />
+        <MapLocationPicker enabled={manualPickMode} onPick={pickMapLocation} />
+        <MapTileLayer />
         {flyToUser && <FlyToUser pos={flyToUser} />}
         {selectedBarber && <FlyTo pos={[selectedBarber.lat!, selectedBarber.lng!]} />}
-        {userLoc && locationEnabled && <Marker position={userLoc} icon={ME_ICON} />}
+        {userLoc && locationEnabled && <Marker position={userLoc} icon={locationSource === 'manual' ? MANUAL_LOCATION_ICON : ME_ICON} />}
         {filtered.map(b => (
           <Marker
             key={b.id}
             position={[b.lat!, b.lng!]}
-            icon={barberPhotoIcon(b.avatar, b.shopName || b.name, b.liveStatus || 'available', selected === b.id)}
+            icon={barberPhotoIcon(b.avatar, b.shopName || b.name, b.liveStatus || 'unknown', selected === b.id)}
             eventHandlers={{ click: () => setSelected(prev => prev === b.id ? null : b.id) }}
           />
         ))}
@@ -295,7 +385,7 @@ export default function MapPage() {
                 <p className="font-black text-foreground truncate">{selectedBarber.shopName || selectedBarber.name}</p>
                 <p className="text-xs text-muted-foreground truncate">{selectedBarber.address || selectedBarber.name}</p>
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
-                  <span className="text-[11px] font-bold text-primary">{statusLabel(selectedBarber.liveStatus || 'available')}</span>
+                  <span className="text-[11px] font-bold text-primary">{statusLabel(selectedBarber.liveStatus || 'unknown')}</span>
                   {selectedBarber.rating && (
                     <div className="flex items-center gap-1">
                       <Star size={10} className="fill-primary text-primary" />
@@ -324,7 +414,7 @@ export default function MapPage() {
                 onClick={() => navigate(`/barbers/${selectedBarber.id}`)}
                 className="bg-primary text-primary-foreground py-3 rounded-2xl text-sm font-black"
               >
-                {ar ? 'احجز الآن' : 'Book Now'}
+                {selectedBarber.services?.length ? (ar ? 'عرض الخدمات والحجز' : 'Services & Book') : (ar ? 'عرض ملف الصالون' : 'View salon')}
               </button>
               <button
                 onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${selectedBarber.lat},${selectedBarber.lng}`, '_blank')}
@@ -339,8 +429,35 @@ export default function MapPage() {
 
       {filtered.length === 0 && (
         <div className="absolute bottom-32 left-4 right-4 z-[1000] bg-card/90 backdrop-blur-sm border border-border rounded-2xl p-4 text-center">
-          <p className="text-sm font-bold text-foreground">{ar ? 'لا يوجد حلاقون' : 'No barbers found'}</p>
-          <p className="text-xs text-muted-foreground mt-1">{ar ? 'جرب فلتراً آخر' : 'Try a different filter'}</p>
+          {loadingBarbers ? (
+            <>
+              <p className="text-sm font-bold text-foreground">{ar ? 'جاري تحميل الصالونات...' : 'Loading salons...'}</p>
+              <p className="text-xs text-muted-foreground mt-1">{ar ? 'يتم جلب المواقع المنشورة' : 'Fetching published salon locations'}</p>
+            </>
+          ) : barbersError ? (
+            <>
+              <p className="text-sm font-bold text-foreground">{ar ? 'تعذر تحميل مواقع الحلاقين' : 'Could not load barber locations'}</p>
+              <p className="text-xs text-muted-foreground mt-1 break-words">{barbersError}</p>
+            </>
+          ) : barbersWithCoords.length === 0 ? (
+            <>
+              <p className="text-sm font-bold text-foreground">
+                {allBarbers.length > 0
+                  ? (ar ? 'مواقع الصالونات غير محفوظة' : 'Salon locations are missing')
+                  : (ar ? 'لا توجد صالونات منشورة بعد' : 'No salons have been published yet')}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {allBarbers.length > 0
+                  ? (ar ? 'على الحلاق إكمال إعداد الصالون وحفظ موقعه على الخريطة' : 'The barber needs to finish salon setup and save its map location')
+                  : (ar ? 'يظهر الصالون بعد إكمال إعداد الحلاق وحفظ موقعه' : 'A salon appears after the barber finishes setup and saves its location')}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-bold text-foreground">{ar ? 'لا توجد نتائج بهذا الفلتر' : 'No results for this filter'}</p>
+              <p className="text-xs text-muted-foreground mt-1">{ar ? 'جرّب فلتر الكل' : 'Try the All filter'}</p>
+            </>
+          )}
         </div>
       )}
     </div>

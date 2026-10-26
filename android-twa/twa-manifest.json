@@ -1,8 +1,8 @@
 {
-  "packageId": "com.barbergo.app",
+  "packageId": "jo.halaqi.app",
   "host": "halaqyapp.web.app",
-  "name": "Barber Go - احجز حلاقك",
-  "launcherName": "Barber Go",
+  "name": "7alaqi - حلاقي",
+  "launcherName": "حلاقي",
   "display": "standalone",
   "themeColor": "#D97706",
   "navigationColor": "#0a0a0a",
@@ -20,8 +20,8 @@
     "path": "./android.keystore",
     "alias": "barbergo"
   },
-  "appVersionCode": 1,
-  "appVersion": "1.0.0",
+  "appVersionCode": 2,
+  "appVersion": "1.0.1",
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://halaqyapp.web.app/manifest.json",

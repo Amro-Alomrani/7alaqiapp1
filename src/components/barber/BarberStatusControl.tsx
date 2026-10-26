@@ -29,7 +29,7 @@ interface Props {
   defaultStatus?: BarberStatus;
 }
 
-export default function BarberStatusControl({ barberId, defaultStatus = 'available' }: Props) {
+export default function BarberStatusControl({ barberId, defaultStatus = 'closed' }: Props) {
   const [open, setOpen] = useState(false);
   const [eta, setEta] = useState<number | undefined>(undefined);
   const [activity, setActivity] = useState<string>('');

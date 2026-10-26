@@ -1,4 +1,4 @@
-import { Star, Zap, Timer, Shield } from 'lucide-react';
+import { Star, Timer, Shield } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Barber } from '@/types';
 import { useNavigate } from 'react-router-dom';
@@ -7,10 +7,9 @@ import { useLanguage } from '@/contexts/LanguageContext';
 
 interface Props {
   barber: Barber;
-  isBestMatch?: boolean;
 }
 
-export default function BarberPickerCard({ barber, isBestMatch }: Props) {
+export default function BarberPickerCard({ barber }: Props) {
   const navigate = useNavigate();
   const { language } = useLanguage();
   const ar = language === 'ar';
@@ -19,26 +18,19 @@ export default function BarberPickerCard({ barber, isBestMatch }: Props) {
     available:      ar ? 'متاح الآن'   : 'Available Now',
     finishing_soon: ar ? 'ينتهي قريباً' : 'Finishing Soon',
     busy:           ar ? 'مشغول'       : 'Busy',
+    closed:         ar ? 'مغلق'         : 'Closed',
   }[barber.liveStatus] ?? '';
 
-  const statusDot = { available: 'bg-foreground/40', finishing_soon: 'bg-primary', busy: 'bg-destructive' }[barber.liveStatus] ?? 'bg-muted';
-  const statusText = { available: 'text-foreground', finishing_soon: 'text-primary', busy: 'text-destructive' }[barber.liveStatus] ?? 'text-muted-foreground';
+  const statusDot = { available: 'bg-foreground/40', finishing_soon: 'bg-primary', busy: 'bg-destructive', closed: 'bg-muted-foreground' }[barber.liveStatus] ?? 'bg-muted';
+  const statusText = { available: 'text-foreground', finishing_soon: 'text-primary', busy: 'text-destructive', closed: 'text-muted-foreground' }[barber.liveStatus] ?? 'text-muted-foreground';
   const isPulse = barber.liveStatus === 'finishing_soon';
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`bg-card border rounded-2xl overflow-hidden ${isBestMatch ? 'border-primary/40' : 'border-border'}`}
+      className="bg-card border border-border rounded-2xl overflow-hidden"
     >
-      {isBestMatch && (
-        <div className="bg-primary px-4 py-1.5 flex items-center gap-1.5">
-          <Zap size={11} className="text-primary-foreground" />
-          <span className="text-[11px] font-bold text-primary-foreground uppercase tracking-wider">
-            {ar ? 'أفضل اختيار بالذكاء الاصطناعي' : 'AI Best Match for You'}
-          </span>
-        </div>
-      )}
       <div className="flex items-center gap-3 p-3">
         <div className="relative flex-shrink-0">
           <div className="w-14 h-14 rounded-xl overflow-hidden">

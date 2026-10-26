@@ -7,6 +7,7 @@ interface DataCtx {
   posts: Post[];
   loadingBarbers: boolean;
   loadingPosts: boolean;
+  barbersError: string | null;
 }
 
 const DataContext = createContext<DataCtx>({
@@ -14,6 +15,7 @@ const DataContext = createContext<DataCtx>({
   posts: [],
   loadingBarbers: true,
   loadingPosts: true,
+  barbersError: null,
 });
 
 export function DataProvider({ children }: { children: ReactNode }) {
@@ -21,6 +23,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loadingBarbers, setLoadingBarbers] = useState(true);
   const [loadingPosts, setLoadingPosts] = useState(true);
+  const [barbersError, setBarbersError] = useState<string | null>(null);
 
   useEffect(() => {
     let unsubB: (() => void) | null = null;
@@ -30,6 +33,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       unsubB = subscribeBarbers(list => {
         setBarbers(list);
         setLoadingBarbers(false);
+        setBarbersError(null);
+      }, error => {
+        setBarbers([]);
+        setLoadingBarbers(false);
+        setBarbersError(error.message || 'Could not load barber profiles');
       });
       unsubP = subscribePosts(list => {
         setPosts(list);
@@ -38,6 +46,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } catch {
       setLoadingBarbers(false);
       setLoadingPosts(false);
+      setBarbersError('Could not connect to the barber database');
     }
 
     return () => {
@@ -47,8 +56,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ barbers, posts, loadingBarbers, loadingPosts }),
-    [barbers, posts, loadingBarbers, loadingPosts],
+    () => ({ barbers, posts, loadingBarbers, loadingPosts, barbersError }),
+    [barbers, posts, loadingBarbers, loadingPosts, barbersError],
   );
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 }

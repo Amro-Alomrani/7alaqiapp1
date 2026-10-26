@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import { useAuth } from '@/contexts/AuthContext';
 import { subscribeNotifications, type NotificationDoc } from '@/lib/db';
 
@@ -10,18 +12,29 @@ import { subscribeNotifications, type NotificationDoc } from '@/lib/db';
  */
 export default function NotificationsListener() {
   const { customer, barberUser } = useAuth();
+  const navigate = useNavigate();
   const uid = customer?.uid || barberUser?.uid;
-  const startedAtRef = useRef<number>(Date.now());
+  const startedAtRef = useRef<number>(0);
   const seenRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!uid) return;
-    try {
-      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-        void Notification.requestPermission();
-      }
-    } catch {  }
-  }, [uid]);
+    if (!uid || !Capacitor.isNativePlatform()) return;
+    let disposed = false;
+    let actionListener: { remove: () => Promise<void> } | undefined;
+    void import('@capacitor/push-notifications').then(async ({ PushNotifications }) => {
+      actionListener = await PushNotifications.addListener('pushNotificationActionPerformed', event => {
+        const data = event.notification.data as { bookingId?: string; postId?: string } | undefined;
+        if (data?.bookingId) navigate('/booking-status');
+        else if (data?.postId) navigate('/feed');
+        else navigate('/notifications');
+      });
+      if (disposed) await actionListener.remove();
+    }).catch(() => undefined);
+    return () => {
+      disposed = true;
+      void actionListener?.remove();
+    };
+  }, [uid, navigate]);
 
   useEffect(() => {
     if (!uid) return;
@@ -33,7 +46,7 @@ export default function NotificationsListener() {
         if (seenRef.current.has(n.id)) return;
         seenRef.current.add(n.id);
         if (n.createdAt < startedAtRef.current - 2000) return; // skip historical
-        showNotification(n);
+        showNotification(n, !Capacitor.isNativePlatform());
       });
     });
     return () => unsub();
@@ -42,7 +55,7 @@ export default function NotificationsListener() {
   return null;
 }
 
-function showNotification(n: NotificationDoc & { id: string }) {
+function showNotification(n: NotificationDoc & { id: string }, showBrowserNotification: boolean) {
   try {
     const t = `${n.title}`;
     const description = n.body;
@@ -51,10 +64,10 @@ function showNotification(n: NotificationDoc & { id: string }) {
     } else {
       toast(t, { description });
     }
-  } catch {  }
+  } catch { return; }
   try {
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    if (showBrowserNotification && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       new Notification(n.title, { body: n.body, icon: n.fromAvatar || '/logo.png' });
     }
-  } catch {  }
+  } catch { return; }
 }

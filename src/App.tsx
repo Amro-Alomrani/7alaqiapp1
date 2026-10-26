@@ -6,12 +6,36 @@ import NotificationsListener from '@/components/NotificationsListener';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { LanguageProvider } from '@/contexts/LanguageContext';
-import { BookingProvider } from '@/contexts/BookingContext';
 import { LiveBookingProvider } from '@/contexts/LiveBookingContext';
 import { DataProvider } from '@/contexts/DataContext';
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { useSafeBack } from '@/hooks/useSafeBack';
 
 const Loader = () => <div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+
+function NativeBackButtonHandler() {
+  const safeBack = useSafeBack();
+  const safeBackRef = useRef(safeBack);
+
+  useEffect(() => { safeBackRef.current = safeBack; }, [safeBack]);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let disposed = false;
+    let listener: { remove: () => Promise<void> } | undefined;
+    void import('@capacitor/app').then(async ({ App }) => {
+      listener = await App.addListener('backButton', () => safeBackRef.current());
+      if (disposed) await listener.remove();
+    }).catch(() => undefined);
+    return () => {
+      disposed = true;
+      void listener?.remove();
+    };
+  }, []);
+
+  return null;
+}
 
 const HomePage = lazy(() => import('@/pages/HomePage'));
 const FeedPage = lazy(() => import('@/pages/FeedPage'));
@@ -39,6 +63,8 @@ const RoleSelectPage = lazy(() => import('@/pages/auth/RoleSelectPage'));
 const LoginPage = lazy(() => import('@/pages/auth/LoginPage'));
 const RegisterPage = lazy(() => import('@/pages/auth/RegisterPage'));
 const BarberLoginPage = lazy(() => import('@/pages/auth/BarberLoginPage'));
+const LegalPage = lazy(() => import('@/pages/LegalPage'));
+const DeleteAccountPage = lazy(() => import('@/pages/DeleteAccountPage'));
 
 const BarberLayout = lazy(() => import('@/pages/barber/BarberLayout'));
 const BarberDashboardPage = lazy(() => import('@/pages/barber/BarberDashboardPage'));
@@ -104,7 +130,11 @@ function AppRoutes() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/barber/login" element={<BarberLoginPage />} />
+        <Route path="/privacy" element={<LegalPage kind="privacy" />} />
+        <Route path="/terms" element={<LegalPage kind="terms" />} />
       </Route>
+
+      <Route path="/delete-account" element={<DeleteAccountPage />} />
 
       <Route element={<BarberGuard />}>
         <Route path="/barber" element={<BarberLayout />}>
@@ -164,12 +194,11 @@ export default function App() {
         <LanguageProvider>
           <AuthProvider>
             <DataProvider>
-              <BookingProvider>
-                <LiveBookingProvider>
-                  <NotificationsListener />
-                  <AppRoutes />
-                </LiveBookingProvider>
-              </BookingProvider>
+              <LiveBookingProvider>
+                <NativeBackButtonHandler />
+                <NotificationsListener />
+                <AppRoutes />
+              </LiveBookingProvider>
             </DataProvider>
           </AuthProvider>
         </LanguageProvider>

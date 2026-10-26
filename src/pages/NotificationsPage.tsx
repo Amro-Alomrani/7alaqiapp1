@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSafeBack } from "@/hooks/useSafeBack";
 import { ArrowLeft, BellOff, Calendar, Heart, Bell, Check, CheckCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -39,6 +40,7 @@ function iconFor(type: NotificationDoc['type']) {
 
 export default function NotificationsPage() {
   const navigate = useNavigate();
+  const safeBack = useSafeBack();
   const { language, isRTL } = useLanguage();
   const ar = language === 'ar';
   const { customer, barberUser } = useAuth();
@@ -63,7 +65,9 @@ export default function NotificationsPage() {
   const onTap = async (n: NotificationDoc & { id: string }) => {
     if (!uid) return;
     if (!n.read) await markNotificationRead(n.id).catch(() => {});
-    if (n.bookingId) navigate(`/booking-status/${n.bookingId}`);
+    // The router exposes /booking-status without an ID parameter; the page
+    // resolves the active booking from the signed-in user's live bookings.
+    if (n.bookingId) navigate('/booking-status');
     else if (n.postId) navigate('/feed');
   };
 
@@ -72,7 +76,7 @@ export default function NotificationsPage() {
       <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="flex items-center justify-between px-5 py-4">
           <div className="flex items-center gap-3">
-            <button onClick={() => navigate(-1)} className="w-10 h-10 rounded-full bg-card border border-border flex items-center justify-center">
+            <button onClick={() => safeBack()} className="w-10 h-10 rounded-full bg-card border border-border flex items-center justify-center">
               <ArrowLeft size={18} className={`text-foreground ${isRTL ? 'rotate-180' : ''}`} />
             </button>
             <div>

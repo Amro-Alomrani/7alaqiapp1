@@ -1,15 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSafeBack } from "@/hooks/useSafeBack";
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Send, Phone, MapPin, Bell, Camera, X, ImageIcon } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLiveBooking } from '@/contexts/LiveBookingContext';
 import { subscribeBookingMessages, sendBookingMessage, pushNotification, type MessageDoc } from '@/lib/db';
-import { uploadImage } from '@/lib/storage';
+import { describeImageUploadError, uploadImage } from '@/lib/storage';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { toast } from 'sonner';
 
 export default function BookingChatPage() {
   const navigate = useNavigate();
+  const safeBack = useSafeBack();
   const { bookingId } = useParams<{ bookingId: string }>();
   const { barberUser, customer } = useAuth();
   const { allBookings } = useLiveBooking();
@@ -92,8 +94,10 @@ export default function BookingChatPage() {
         msgText || (ar ? '📷 صورة' : '📷 Image'),
         uploadedUrl,
       );
-    } catch {
-      toast.error(ar ? 'فشل إرسال الرسالة' : 'Failed to send message');
+    } catch (error) {
+      toast.error(ar ? 'فشل إرسال الرسالة' : 'Failed to send message', {
+        description: imageFile ? describeImageUploadError(error, ar) : undefined,
+      });
       setText(msgText);
       setUploading(false);
     } finally {
@@ -134,7 +138,7 @@ export default function BookingChatPage() {
       <div className="px-4 pt-14 pb-4 border-b border-border bg-background/95 backdrop-blur sticky top-0 z-10">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate(-1)}
+            onClick={() => safeBack()}
             className="w-10 h-10 bg-card border border-border rounded-full flex items-center justify-center flex-shrink-0"
           >
             <ArrowLeft size={18} className={ar ? 'rotate-180' : ''} />

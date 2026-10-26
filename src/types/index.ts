@@ -1,5 +1,5 @@
 export type BookingStatus = 'upcoming' | 'completed' | 'cancelled';
-export type LiveStatus = 'available' | 'finishing_soon' | 'busy';
+export type LiveStatus = 'available' | 'finishing_soon' | 'busy' | 'closed';
 export type BarberBookingStatus = 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
 
 export interface Notification {
@@ -98,6 +98,8 @@ export interface Barber {
   isOnboarded?: boolean;
   onboardingComplete?: boolean;
   isLive?: boolean;
+  offersHomeService?: boolean;
+  homeServiceFee?: number;
   staffIds?: string[];
   staff?: Staff[];
   workingHours?: WorkingHours;
@@ -284,8 +286,11 @@ export interface LiveBooking {
   queuePosition: number;
   totalPrice: number;
   tip: number;
+  homeServiceFee?: number;
+  homeService?: boolean;
   payMethod: 'cash' | 'wallet';
   customerLocation?: { lat: number; lng: number };
+  customerLocationUpdatedAt?: number;
   salonLocation?: { lat: number; lng: number };
   barberPhone?: string;
   rating?: number;

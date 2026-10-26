@@ -7,19 +7,17 @@
  */
 
 export const firebaseConfig = {
-  apiKey: 'AIzaSyCBRzHkkASsgW-o8WuCca6LsSjtXkNAYiE',
-  authDomain: 'halaqyapp.firebaseapp.com',
-  databaseURL: 'https://halaqyapp-default-rtdb.firebaseio.com',
-  projectId: 'halaqyapp',
-  storageBucket: 'halaqyapp.firebasestorage.app',
-  messagingSenderId: '559982533825',
-  appId: '1:559982533825:android:09d88e5eec3bd11d200840',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCBRzHkkASsgW-o8WuCca6LsSjtXkNAYiE',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'halaqyapp.firebaseapp.com',
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || 'https://halaqyapp-default-rtdb.firebaseio.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'halaqyapp',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'halaqyapp.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '559982533825',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:559982533825:android:09d88e5eec3bd11d200840',
 };
 
 let appPromise: Promise<any> | null = null;
 let authPromise: Promise<any> | null = null;
-let recaptcha: any = null;
-let pendingConfirmation: any = null;
 
 async function getApp() {
   if (!appPromise) {
@@ -42,19 +40,8 @@ async function getAuthInstance() {
   return authPromise;
 }
 
-function ensureRecaptchaContainer(): HTMLElement {
-  let el = document.getElementById('recaptcha-container');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'recaptcha-container';
-    el.style.position = 'fixed';
-    el.style.bottom = '0';
-    el.style.right = '0';
-    el.style.opacity = '0';
-    el.style.pointerEvents = 'none';
-    document.body.appendChild(el);
-  }
-  return el;
+export async function getFirebaseAuthLazy() {
+  return getAuthInstance();
 }
 
 export async function signInWithGoogleFirebase() {
@@ -66,31 +53,13 @@ export async function signInWithGoogleFirebase() {
   return result.user;
 }
 
-export async function startPhoneSignIn(phoneE164: string) {
-  const auth = await getAuthInstance();
-  const { RecaptchaVerifier, signInWithPhoneNumber } = await import('firebase/auth');
-  ensureRecaptchaContainer();
-  if (!recaptcha) {
-    recaptcha = new RecaptchaVerifier(auth, 'recaptcha-container', { size: 'invisible' });
-  }
-  pendingConfirmation = await signInWithPhoneNumber(auth, phoneE164, recaptcha);
-  return pendingConfirmation.verificationId as string;
-}
-
-export async function confirmPhoneSignIn(code: string) {
-  if (!pendingConfirmation) throw new Error('No pending phone confirmation. Send the code first.');
-  const cred = await pendingConfirmation.confirm(code);
-  pendingConfirmation = null;
-  return cred.user;
-}
-
 export async function signOutFirebase() {
   try {
     const auth = await getAuthInstance();
     const { signOut } = await import('firebase/auth');
     await signOut(auth);
   } catch {
-    
+
   }
 }
 
@@ -129,6 +98,19 @@ export async function getFirestoreLazy() {
   return getFirestore(app);
 }
 
+export async function getFunctionsLazy() {
+  const app = await getApp();
+  const { getFunctions } = await import('firebase/functions');
+  return getFunctions(app, 'us-central1');
+}
+
+export async function deleteOwnAccount() {
+  const functions = await getFunctionsLazy();
+  const { httpsCallable } = await import('firebase/functions');
+  const remove = httpsCallable<Record<string, never>, { status: 'deleted' }>(functions, 'deleteOwnAccount');
+  return (await remove({})).data;
+}
+
 export async function getRealtimeDbLazy() {
   const app = await getApp();
   const { getDatabase } = await import('firebase/database');
@@ -152,6 +134,59 @@ export async function getMessagingLazy() {
 
 export async function requestFcmToken() {
   try {
+    // Capacitor's registration token is an APNs token on iOS. Convert it to an
+    // FCM token before saving it because the Cloud Function sends through FCM.
+    const { Capacitor } = await import('@capacitor/core');
+    if (Capacitor.isNativePlatform()) {
+      const { PushNotifications } = await import('@capacitor/push-notifications');
+      const permission = await PushNotifications.checkPermissions();
+      const granted = permission.receive === 'granted'
+        ? permission
+        : await PushNotifications.requestPermissions();
+      if (granted.receive !== 'granted') return null;
+
+      const registration = new Promise<string>((resolve, reject) => {
+        let settled = false;
+        let registrationHandle: { remove: () => Promise<void> } | undefined;
+        let errorHandle: { remove: () => Promise<void> } | undefined;
+        const finish = (error?: Error, token?: string) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          void registrationHandle?.remove();
+          void errorHandle?.remove();
+          if (error) reject(error);
+          else if (token) resolve(token);
+          else reject(new Error('Push registration returned no token'));
+        };
+        const timeout = setTimeout(() => finish(new Error('Push registration timed out')), 15000);
+        void (async () => {
+          registrationHandle = await PushNotifications.addListener('registration', async event => {
+            try {
+              if (Capacitor.getPlatform() === 'ios') {
+                const { FCM } = await import('@capacitor-community/fcm');
+                const result = await FCM.getToken();
+                finish(undefined, result.token);
+              } else {
+                finish(undefined, event.value);
+              }
+            } catch (error) {
+              finish(error instanceof Error ? error : new Error('Unable to get FCM token'));
+            }
+          });
+          if (settled) { void registrationHandle.remove(); return; }
+          errorHandle = await PushNotifications.addListener('registrationError', error => {
+            finish(new Error(error.error || 'Push registration failed'));
+          });
+          if (settled) { void errorHandle.remove(); return; }
+          await PushNotifications.register();
+        })().catch(error => finish(error instanceof Error ? error : new Error('Push registration failed')));
+      });
+      return await registration;
+    }
+
+    // Web FCM needs a VAPID key and a Firebase messaging service worker. Those
+    // are intentionally not fabricated from the native Android Firebase config.
     const messaging = await getMessagingLazy();
     if (!messaging) return null;
     const { getToken } = await import('firebase/messaging');
@@ -161,5 +196,3 @@ export async function requestFcmToken() {
 return null;
   }
 }
-
-export function isFirebaseReady() { return true; }

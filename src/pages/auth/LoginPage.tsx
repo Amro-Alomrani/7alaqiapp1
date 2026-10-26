@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Mail, Lock, Eye, EyeOff, ArrowRight, ChevronLeft, Globe } from 'lucide-react';
 import { toast } from 'sonner';
@@ -7,9 +7,11 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { loginEmail, resetPassword } from '@/lib/auth-providers';
+import { authErrorCode, mapAuthError, mapPasswordResetError } from '@/lib/authErrors';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { loginCustomer, loginBarber } = useAuth();
   const { language, setLanguage, isRTL } = useLanguage();
   const ar = language === 'ar';
@@ -18,6 +20,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
 
   const handleLogin = async () => {
     if (!email.trim() || password.length < 6) {
@@ -30,34 +33,40 @@ export default function LoginPage() {
       const { getUser } = await import('@/lib/db');
       const profile = await getUser(user.uid).catch(() => null);
       const role = profile?.role;
+      const requestedDestination = (location.state as { from?: unknown } | null)?.from;
+      const returnToDeletion = requestedDestination === '/delete-account';
       if (role === 'barber') {
         const { getBarber } = await import('@/lib/db');
         const barberDoc = await getBarber(user.uid).catch(() => null);
         loginBarber(user.email || email.trim(), user.uid, barberDoc?.name || user.name, barberDoc?.shopName);
         toast.success(ar ? `أهلاً ${user.name || ''} ✂️` : `Welcome, ${user.name || ''} ✂️`);
-        navigate('/barber');
+        navigate(returnToDeletion ? '/delete-account' : '/barber');
       } else {
         loginCustomer(user.phone || '', user.name, user.uid);
         toast.success(ar ? `أهلاً ${user.name || ''} 👋` : `Welcome, ${user.name || ''} 👋`);
-        navigate('/');
+        navigate(returnToDeletion ? '/delete-account' : '/');
       }
-    } catch (e: any) {
-      toast.error(mapAuthError(e?.code || e?.message, ar));
+    } catch (error: unknown) {
+      toast.error(mapAuthError(authErrorCode(error), ar));
     } finally {
       setLoading(false);
     }
   };
+
 
   const handleReset = async () => {
     if (!email.trim()) {
       toast.error(ar ? 'أدخل بريدك الإلكتروني أولاً' : 'Enter your email first');
       return;
     }
+    setResetLoading(true);
     try {
       await resetPassword(email.trim());
       toast.success(ar ? '📧 تم إرسال رابط إعادة تعيين كلمة المرور' : '📧 Password reset link sent');
-    } catch (e: any) {
-      toast.error(mapAuthError(e?.code, ar));
+    } catch (error: unknown) {
+      toast.error(mapPasswordResetError(authErrorCode(error), ar));
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -139,10 +148,11 @@ export default function LoginPage() {
         </div>
 
         <div className="flex justify-end">
-          <button onClick={handleReset} className="text-xs text-primary font-semibold">
+          <button onClick={handleReset} disabled={resetLoading} className="text-xs text-primary font-semibold disabled:opacity-50">
             {ar ? 'نسيت كلمة المرور؟' : 'Forgot password?'}
           </button>
         </div>
+
 
         <Button
           onClick={handleLogin}
@@ -168,28 +178,7 @@ export default function LoginPage() {
         </p>
 
       </motion.div>
+
     </div>
   );
-}
-
-export function mapAuthError(code: string | undefined, ar: boolean): string {
-  switch (code) {
-    case 'auth/invalid-email':
-      return ar ? 'بريد إلكتروني غير صالح' : 'Invalid email';
-    case 'auth/user-not-found':
-      return ar ? 'لا يوجد حساب بهذا البريد' : 'No account with this email';
-    case 'auth/wrong-password':
-    case 'auth/invalid-credential':
-      return ar ? 'بريد أو كلمة مرور خاطئة' : 'Wrong email or password';
-    case 'auth/email-already-in-use':
-      return ar ? 'البريد مسجَّل مسبقاً' : 'Email already in use';
-    case 'auth/weak-password':
-      return ar ? 'كلمة المرور ضعيفة (6 أحرف على الأقل)' : 'Weak password (min 6 chars)';
-    case 'auth/network-request-failed':
-      return ar ? 'تعذّر الاتصال بالإنترنت' : 'Network error';
-    case 'auth/too-many-requests':
-      return ar ? 'محاولات كثيرة، انتظر قليلاً' : 'Too many attempts, try later';
-    default:
-      return ar ? `حدث خطأ: ${code || ''}` : `Error: ${code || 'unknown'}`;
-  }
 }

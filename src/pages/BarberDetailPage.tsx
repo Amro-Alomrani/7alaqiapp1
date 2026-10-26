@@ -1,4 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
+import { useSafeBack } from "@/hooks/useSafeBack";
 import { ArrowLeft, Star, MapPin, Clock, Heart, Share2, Zap, Shield, Timer, Lock, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useEffect } from 'react';
@@ -18,6 +19,7 @@ import { toast } from 'sonner';
 export default function BarberDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const safeBack = useSafeBack();
   const { t, language } = useLanguage();
   const ar = language === 'ar';
   const barber = useBarber(id);
@@ -110,7 +112,7 @@ export default function BarberDetailPage() {
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/30 to-transparent" />
         <div className="absolute top-12 left-0 right-0 flex items-center justify-between px-5">
-          <button onClick={() => navigate(-1)} className="w-10 h-10 bg-black/40 backdrop-blur-sm rounded-full flex items-center justify-center">
+          <button onClick={() => safeBack()} className="w-10 h-10 bg-black/40 backdrop-blur-sm rounded-full flex items-center justify-center">
             <ArrowLeft size={20} className="text-white" />
           </button>
           <div className="flex gap-2">

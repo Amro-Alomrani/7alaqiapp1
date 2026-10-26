@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { useSafeBack } from "@/hooks/useSafeBack";
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Phone, MessageCircle, MapPin, Clock, Star, CheckCircle2, Loader2, QrCode, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'sonner';
 import { useLiveBooking } from '@/contexts/LiveBookingContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { LiveBookingStatus } from '@/types';
@@ -21,10 +23,12 @@ function toVisualStep(status: LiveBookingStatus): number {
 
 export default function BookingStatusPage() {
   const navigate = useNavigate();
+  const safeBack = useSafeBack();
   const { activeBooking, bookingHistory, cancelBooking, rateBooking } = useLiveBooking();
   const { language } = useLanguage();
   const ar = language === 'ar';
   const [rating, setRating] = useState(0);
+  const [cancelling, setCancelling] = useState(false);
 
   const booking = activeBooking || bookingHistory[0];
 
@@ -44,6 +48,7 @@ export default function BookingStatusPage() {
   }
 
   const isTerminal = ['completed', 'cancelled', 'rejected'].includes(booking.status);
+  const canCancel = ['requested', 'accepted'].includes(booking.status);
   const isCompleted = booking.status === 'completed';
   const isCancelled = ['cancelled', 'rejected'].includes(booking.status);
   const visualStep = toVisualStep(booking.status);
@@ -52,7 +57,7 @@ export default function BookingStatusPage() {
   return (
     <div className="min-h-screen flex flex-col pb-10" dir={ar ? 'rtl' : 'ltr'}>
       <div className="flex items-center gap-3 px-5 pt-14 pb-4">
-        <button onClick={() => navigate(-1)}
+        <button onClick={() => safeBack()}
           className="w-10 h-10 bg-card border border-border rounded-full flex items-center justify-center">
           <ArrowLeft size={18} className={ar ? 'rotate-180' : ''} />
         </button>
@@ -60,12 +65,22 @@ export default function BookingStatusPage() {
           <h1 className="font-bold text-foreground">{ar ? 'حالة الحجز' : 'Booking Status'}</h1>
           <p className="text-xs text-muted-foreground">#{booking.id.slice(-6)}</p>
         </div>
-        {!isTerminal && (
+        {canCancel && (
           <button
-            onClick={() => cancelBooking(booking.id)}
-            className="text-xs text-destructive font-bold bg-destructive/10 px-3 py-1.5 rounded-xl"
+            disabled={cancelling}
+            onClick={async () => {
+              if (cancelling) return;
+              setCancelling(true);
+              try {
+                const cancelled = await cancelBooking(booking.id);
+                if (!cancelled) toast.error(ar ? 'تعذر إلغاء الحجز. تحقق من الاتصال وحاول مجدداً.' : 'Could not cancel the booking. Check your connection and try again.');
+              } finally {
+                setCancelling(false);
+              }
+            }}
+            className="text-xs text-destructive font-bold bg-destructive/10 px-3 py-1.5 rounded-xl disabled:opacity-50"
           >
-            {ar ? 'إلغاء' : 'Cancel'}
+            {cancelling ? <Loader2 size={14} className="animate-spin" /> : ar ? 'إلغاء' : 'Cancel'}
           </button>
         )}
       </div>
@@ -213,7 +228,7 @@ export default function BookingStatusPage() {
 
       <div className="mx-5 mb-5">
         <div className="bg-card border border-border rounded-2xl p-4 flex items-center gap-3">
-          <img src={booking.barberAvatar} alt={booking.barberName} className="w-14 h-14 rounded-2xl object-cover" />
+          <img src={booking.barberAvatar || '/logo.png'} alt={booking.barberName} onError={event => { event.currentTarget.onerror = null; event.currentTarget.src = '/logo.png'; }} className="w-14 h-14 rounded-2xl object-cover" />
           <div className="flex-1 min-w-0">
             <p className="font-bold text-foreground">{booking.barberName}</p>
             <p className="text-xs text-muted-foreground">{booking.barberShop}</p>
@@ -278,6 +293,12 @@ export default function BookingStatusPage() {
               <span className="text-sm text-muted-foreground">{ar ? 'المجموع الفرعي' : 'Subtotal'}</span>
               <span className="text-sm text-foreground">{booking.service.price} JOD</span>
             </div>
+            {(booking.homeServiceFee ?? 0) > 0 && (
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">{ar ? 'رسم الخدمة المنزلية' : 'Home-service fee'}</span>
+                <span className="text-sm text-foreground">{booking.homeServiceFee} JOD</span>
+              </div>
+            )}
             {booking.tip > 0 && (
               <div className="flex justify-between">
                 <span className="text-sm text-muted-foreground">{ar ? 'إكرامية' : 'Tip'}</span>
