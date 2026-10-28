@@ -2,18 +2,21 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function signedIn() {
-      return request.auth != null;
+    function notDeleting(uid) {
+      return uid is string
+        && !exists(/databases/$(database)/documents/accountDeletionLocks/$(uid));
     }
 
-    function ownsSalon(barberId) {
-      return signedIn() && (request.auth.uid == barberId
-        || get(/databases/$(database)/documents/barbers/$(barberId)).data.ownerUid == request.auth.uid);
+    function signedIn() {
+      return request.auth != null && notDeleting(request.auth.uid);
     }
 
     function bookingParticipant(bookingId) {
       let booking = get(/databases/$(database)/documents/bookings/$(bookingId)).data;
-      return signedIn() && (booking.customerUid == request.auth.uid || booking.barberId == request.auth.uid);
+      return signedIn()
+        && !exists(/databases/$(database)/documents/accountDeletionBookingLocks/$(bookingId))
+        && notDeleting(booking.customerUid) && notDeleting(booking.barberId)
+        && (booking.customerUid == request.auth.uid || booking.barberId == request.auth.uid);
     }
 
     match /barbers/{barberId} {
@@ -39,6 +42,7 @@ service cloud.firestore {
     match /posts/{postId} {
       allow read: if true;
       allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid
+        && !exists(/databases/$(database)/documents/accountDeletionPostLocks/$(postId))
         && request.resource.data.keys().hasOnly([
           'ownerUid', 'postedBy', 'barber', 'type', 'image', 'beforeImage', 'afterImage',
           'hairStyle', 'tags', 'likes', 'comments', 'saves', 'location', 'caption',
@@ -56,8 +60,10 @@ service cloud.firestore {
     match /bookings/{bookingId} {
       allow read: if signedIn() && (resource.data.customerUid == request.auth.uid || resource.data.barberId == request.auth.uid);
       allow create: if signedIn() && request.resource.data.customerUid == request.auth.uid
+        && !exists(/databases/$(database)/documents/accountDeletionBookingLocks/$(bookingId))
         && request.resource.data.status == 'requested'
         && request.resource.data.barberId is string
+        && notDeleting(request.resource.data.barberId)
         && exists(/databases/$(database)/documents/barbers/$(request.resource.data.barberId))
         && get(/databases/$(database)/documents/barbers/$(request.resource.data.barberId)).data.isLive == true
         && get(/databases/$(database)/documents/barbers/$(request.resource.data.barberId)).data.services.hasAny([request.resource.data['service']])
@@ -82,7 +88,10 @@ service cloud.firestore {
         && request.resource.data.totalPrice == request.resource.data['service']['price'] + request.resource.data.get('tip', 0) + request.resource.data.get('homeServiceFee', 0)
         && request.resource.data.pointsEarned == 0
         && request.resource.data.payMethod in ['cash'];
-      allow update: if signedIn() && (
+      allow update: if signedIn()
+        && !exists(/databases/$(database)/documents/accountDeletionBookingLocks/$(bookingId))
+        && notDeleting(resource.data.customerUid) && notDeleting(resource.data.barberId)
+        && (
         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
           && request.resource.data.updatedAt is number
           && ((request.auth.uid == resource.data.customerUid
@@ -110,8 +119,10 @@ service cloud.firestore {
       allow read: if true;
       allow create: if signedIn() && request.resource.data.customerUid == request.auth.uid
         && request.resource.data.barberId is string
+        && notDeleting(request.resource.data.barberId)
         && exists(/databases/$(database)/documents/barbers/$(request.resource.data.barberId))
         && request.resource.data.bookingId == reviewId
+        && !exists(/databases/$(database)/documents/accountDeletionBookingLocks/$(request.resource.data.bookingId))
         && exists(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId))
         && get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid == request.auth.uid
         && get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId == request.resource.data.barberId
@@ -146,13 +157,16 @@ service cloud.firestore {
       allow read: if signedIn() && resource.data.toUid == request.auth.uid;
       allow create: if signedIn() && request.resource.data.fromUid == request.auth.uid
         && request.resource.data.toUid is string
+        && notDeleting(request.resource.data.toUid)
         && request.resource.data.title is string && request.resource.data.title.size() <= 120
         && request.resource.data.body is string && request.resource.data.body.size() <= 500
         && ((request.resource.data.type == 'booking_request'
+            && bookingParticipant(request.resource.data.bookingId)
             && exists(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId))
             && get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid == request.auth.uid
             && get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId == request.resource.data.toUid)
           || (request.resource.data.type == 'booking_update'
+            && bookingParticipant(request.resource.data.bookingId)
             && exists(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId))
             && request.resource.data.toUid != request.auth.uid
             && request.resource.data.toUid in [
@@ -171,6 +185,7 @@ service cloud.firestore {
               get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId
             ])
           || (request.resource.data.type == 'new_post'
+            && !exists(/databases/$(database)/documents/accountDeletionPostLocks/$(request.resource.data.postId))
             && exists(/databases/$(database)/documents/posts/$(request.resource.data.postId))
             && get(/databases/$(database)/documents/posts/$(request.resource.data.postId)).data.ownerUid == request.auth.uid
             && exists(/databases/$(database)/documents/follows/$(request.resource.data.toUid + '__' + request.auth.uid))));
@@ -184,11 +199,13 @@ service cloud.firestore {
       allow read: if signedIn() && (resource.data.salonOwnerId == request.auth.uid || resource.data.barberId == request.auth.uid);
       allow create: if signedIn() && request.resource.data.salonOwnerId == request.auth.uid
         && request.resource.data.barberId == request.auth.uid
+        && notDeleting(request.resource.data.salonOwnerId) && notDeleting(request.resource.data.barberId)
         && request.resource.data.keys().hasOnly([
           'barberId', 'salonOwnerId', 'name', 'specialties', 'avatar', 'workingHours',
           'bookingsCount', 'completedCount', 'createdAt'
         ]);
       allow update: if signedIn() && resource.data.salonOwnerId == request.auth.uid
+        && notDeleting(resource.data.barberId)
         && request.resource.data.salonOwnerId == resource.data.salonOwnerId
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'name', 'specialties', 'avatar', 'workingHours'
@@ -238,6 +255,7 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if signedIn()
         && request.resource.data.followerUid == request.auth.uid
+        && notDeleting(request.resource.data.barberId)
         && followId == request.auth.uid + '__' + request.resource.data.barberId
         && exists(/databases/$(database)/documents/barbers/$(request.resource.data.barberId))
         && request.resource.data.keys().hasOnly(['followerUid', 'barberId', 'barberName', 'barberAvatar', 'createdAt']);

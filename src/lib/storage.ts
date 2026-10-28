@@ -1,6 +1,7 @@
-import { ensureSupabaseBookingMediaAccess } from './firebase';
 import {
-  getSupabase,
+  deleteMediaObject,
+  getPrivateMediaUrl,
+  uploadMediaImage,
   PRIVATE_STORAGE_MARKER,
   SUPABASE_PRIVATE_CHAT_BUCKET,
   SUPABASE_PUBLIC_MEDIA_BUCKET,
@@ -28,55 +29,47 @@ export async function uploadImage(
   if (file.size > 10 * 1024 * 1024) throw new Error('Selected image is over the 10 MB limit.');
   if (file.type && !file.type.startsWith('image/')) throw new Error('Selected file is not an image.');
   const objectPath = normalizeStoragePath(path);
-  const isChatImage = objectPath.startsWith('chats/');
-  if (isChatImage) {
-    const bookingId = objectPath.split('/')[1];
-    if (!bookingId) throw new Error('A booking is required for a private chat image.');
-    await ensureSupabaseBookingMediaAccess(bookingId);
-  }
-
   if (onProgress) onProgress(0);
-  const bucketId = storageBucketForPath(objectPath);
-  const { data, error } = await getSupabase().storage.from(bucketId).upload(objectPath, file, {
-    contentType: file.type || 'image/jpeg',
-    cacheControl: '3600',
-    upsert: false,
-  });
-  if (error) throw error;
-  if (onProgress) onProgress(100);
-
-  if (isChatImage) return `${PRIVATE_STORAGE_MARKER}${bucketId}/${data.path}`;
-  return getSupabase().storage.from(bucketId).getPublicUrl(data.path).data.publicUrl;
+  const uploaded = await uploadMediaImage(objectPath, file, onProgress);
+  if (uploaded.bucket !== storageBucketForPath(objectPath)) throw new Error('Invalid image bucket.');
+  return uploaded.url;
 }
 
 export function describeImageUploadError(error: unknown, arabic = false): string {
   const err = error as { code?: string; message?: string; statusCode?: string; name?: string };
   const code = err?.code || '';
-  if (code === 'storage/unauthorized' || err?.statusCode === '403') return 'Storage denied the upload. Check the bucket policies and your signed-in account.';
-  if (code === 'storage/bucket-not-found' || code === 'storage/no-default-bucket' || err?.statusCode === '404') return 'The configured image storage bucket was not found.';
+  if (code === 'storage/unauthorized' || err?.statusCode === '403') return arabic ? 'تعذر السماح برفع الصورة. تأكد من حسابك وحاول مجددًا.' : 'This account is not allowed to upload the image.';
+  if (code === 'storage/bucket-not-found' || code === 'storage/no-default-bucket' || err?.statusCode === '404') return arabic ? 'خدمة الصور غير متاحة حاليًا. حاول لاحقًا.' : 'Image storage is currently unavailable. Try again later.';
   if (code === 'storage/quota-exceeded' || /quota.*exceed/i.test(err?.message || '')) {
     return arabic
       ? 'تعذر رفع الصورة بسبب حد التخزين. تحقق من الحصة المتاحة في مشروع التخزين.'
       : 'The image could not be uploaded because the storage quota was reached. Check the storage project quota.';
   }
-  if (code === 'storage/unauthenticated' || err?.statusCode === '401') return 'Your sign-in expired. Sign in again and retry the upload.';
-  if (code === 'storage/retry-limit-exceeded' || code === 'storage/canceled' || err?.name === 'AbortError') return 'Upload timed out or was interrupted. Check your connection and retry.';
-  return err?.message || 'Image upload failed. Check the storage configuration and policies.';
+  if (code === 'storage/unauthenticated' || err?.statusCode === '401') return arabic ? 'انتهت جلسة الدخول. سجّل الدخول وحاول رفع الصورة مجددًا.' : 'Your sign-in expired. Sign in again and retry the upload.';
+  if (code === 'storage/retry-limit-exceeded' || code === 'storage/canceled' || err?.name === 'AbortError') return arabic ? 'انقطع رفع الصورة. تحقق من الاتصال وحاول مجددًا.' : 'Upload timed out or was interrupted. Check your connection and retry.';
+  return arabic ? 'تعذر رفع الصورة. تحقق من الاتصال وحاول مجددًا.' : 'Image upload failed. Check your connection and retry.';
 }
 
 export async function deleteImage(path: string): Promise<void> {
-  try {
-    const markerlessPath = path.startsWith(PRIVATE_STORAGE_MARKER)
-      ? path.slice(PRIVATE_STORAGE_MARKER.length)
-      : path;
-    const slash = markerlessPath.indexOf('/');
-    const bucketId = slash > 0 ? markerlessPath.slice(0, slash) : storageBucketForPath(markerlessPath);
-    const objectPath = normalizeStoragePath(slash > 0 ? markerlessPath.slice(slash + 1) : markerlessPath);
-    const { error } = await getSupabase().storage.from(bucketId).remove([objectPath]);
-    if (error) throw error;
-  } catch {
-    // Image cleanup is best-effort; the owning record may already be removed.
+  let bucketId = storageBucketForPath(path);
+  let objectPath = path;
+  if (path.startsWith(PRIVATE_STORAGE_MARKER)) {
+    const rest = path.slice(PRIVATE_STORAGE_MARKER.length);
+    const slash = rest.indexOf('/');
+    bucketId = rest.slice(0, slash);
+    objectPath = rest.slice(slash + 1);
+  } else if (/^https?:\/\//i.test(path)) {
+    const url = new URL(path);
+    const configuredOrigin = new URL(import.meta.env.VITE_SUPABASE_URL).origin;
+    if (url.origin !== configuredOrigin || !url.pathname.startsWith('/storage/v1/object/public/')) {
+      throw new Error('Invalid image URL.');
+    }
+    const parts = url.pathname.slice('/storage/v1/object/public/'.length).split('/').map(decodeURIComponent);
+    bucketId = parts.shift() || '';
+    objectPath = parts.join('/');
   }
+  if (![SUPABASE_PUBLIC_MEDIA_BUCKET, SUPABASE_PRIVATE_CHAT_BUCKET].includes(bucketId)) throw new Error('Invalid image bucket.');
+  await deleteMediaObject(bucketId, normalizeStoragePath(objectPath));
 }
 
 export async function createSignedChatImageUrl(marker: string): Promise<string> {
@@ -86,9 +79,8 @@ export async function createSignedChatImageUrl(marker: string): Promise<string> 
   if (slash < 1) throw new Error('Invalid private chat image reference.');
   const bucketId = rest.slice(0, slash);
   const objectPath = normalizeStoragePath(rest.slice(slash + 1));
-  const { data, error } = await getSupabase().storage.from(bucketId).createSignedUrl(objectPath, 60 * 60);
-  if (error) throw error;
-  return data.signedUrl;
+  if (bucketId !== SUPABASE_PRIVATE_CHAT_BUCKET || !objectPath.startsWith('chats/')) throw new Error('Invalid private image bucket.');
+  return (await getPrivateMediaUrl(bucketId, objectPath)).url;
 }
 
 export function pickImage(accept = 'image/*'): Promise<File | null> {

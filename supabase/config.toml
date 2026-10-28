@@ -1,0 +1,13 @@
+project_id = "vjeuesqrzywragnjvkpi"
+
+[functions.media]
+enabled = true
+# Firebase user tokens are verified against Google by handler.ts before any
+# storage operation. Supabase's JWT gateway only understands Supabase tokens.
+verify_jwt = false
+entrypoint = "./functions/media/index.ts"
+
+[functions.backend]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/backend/index.ts"

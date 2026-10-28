@@ -5,7 +5,8 @@ import { ArrowLeft, Send, Phone, MapPin, Bell, Camera, X, ImageIcon } from 'luci
 import { useAuth } from '@/contexts/AuthContext';
 import { useLiveBooking } from '@/contexts/LiveBookingContext';
 import { subscribeBookingMessages, sendBookingMessage, pushNotification, type MessageDoc } from '@/lib/db';
-import { describeImageUploadError, uploadImage } from '@/lib/storage';
+import { deleteImage, describeImageUploadError, uploadImage } from '@/lib/storage';
+import { BookingMessageImage } from '@/components/BookingMessageImage';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { toast } from 'sonner';
 
@@ -83,7 +84,6 @@ export default function BookingChatPage() {
         const path = `chats/${bookingId}/${myUid}-${Date.now()}.jpg`;
         uploadedUrl = await uploadImage(imageFile, path, pct => setUploadPct(Math.round(pct)));
         setUploading(false);
-        clearImage();
       }
 
       await sendBookingMessage(
@@ -94,7 +94,9 @@ export default function BookingChatPage() {
         msgText || (ar ? '📷 صورة' : '📷 Image'),
         uploadedUrl,
       );
+      clearImage();
     } catch (error) {
+      if (uploadedUrl) void deleteImage(uploadedUrl).catch(() => { /* Keep the original send error visible. */ });
       toast.error(ar ? 'فشل إرسال الرسالة' : 'Failed to send message', {
         description: imageFile ? describeImageUploadError(error, ar) : undefined,
       });
@@ -231,17 +233,7 @@ export default function BookingChatPage() {
                     : 'bg-card border border-border text-foreground rounded-bl-sm'
                 }`}>
                   {msg.imageUrl && (
-                    <button
-                      onClick={() => setLightboxUrl(msg.imageUrl!)}
-                      className="block w-full"
-                    >
-                      <img
-                        src={msg.imageUrl}
-                        alt=""
-                        className="w-full max-h-60 object-cover"
-                        loading="lazy"
-                      />
-                    </button>
+                    <BookingMessageImage src={msg.imageUrl} arabic={ar} onOpen={setLightboxUrl} />
                   )}
                   {msg.text && msg.text !== '📷 صورة' && msg.text !== '📷 Image' && (
                     <div className="px-4 py-2.5">

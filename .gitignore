@@ -81,6 +81,7 @@ tools/lint-*.json
 
 # Firebase hosting cache
 .firebase/
+supabase/.temp/
 
 # Claude local settings
 .claude/

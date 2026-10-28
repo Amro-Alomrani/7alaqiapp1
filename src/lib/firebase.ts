@@ -104,51 +104,6 @@ export async function getFunctionsLazy() {
   return getFunctions(app, 'us-central1');
 }
 
-/**
- * Supabase Storage trusts Firebase Auth as a third-party JWT provider. The
- * provider must issue role=authenticated so Supabase applies authenticated RLS.
- */
-export async function ensureSupabaseStorageRole() {
-  const auth = await getAuthInstance();
-  const user = auth.currentUser;
-  if (!user) throw new Error('Sign in before uploading an image.');
-  const token = await user.getIdTokenResult();
-  if (token.claims.role === 'authenticated') return token.token;
-
-  const functions = await getFunctionsLazy();
-  const { httpsCallable } = await import('firebase/functions');
-  const ensureRole = httpsCallable<Record<string, never>, { status: 'updated' | 'already_set' }>(
-    functions,
-    'ensureSupabaseStorageRole',
-  );
-  await ensureRole({});
-  return user.getIdToken(true);
-}
-
-export async function getSupabaseAccessToken() {
-  const auth = await getAuthInstance();
-  if (!auth.currentUser) return null;
-  return ensureSupabaseStorageRole();
-}
-
-export async function ensureSupabaseBookingMediaAccess(bookingId: string) {
-  if (!bookingId || bookingId.length > 128) throw new Error('A valid booking is required to upload a chat image.');
-  const functions = await getFunctionsLazy();
-  const { httpsCallable } = await import('firebase/functions');
-  const ensureAccess = httpsCallable<{ bookingId: string }, { status: 'ready' }>(
-    functions,
-    'ensureSupabaseBookingMediaAccess',
-  );
-  await ensureAccess({ bookingId });
-}
-
-export async function deleteOwnAccount() {
-  const functions = await getFunctionsLazy();
-  const { httpsCallable } = await import('firebase/functions');
-  const remove = httpsCallable<Record<string, never>, { status: 'deleted' }>(functions, 'deleteOwnAccount');
-  return (await remove({})).data;
-}
-
 export async function getRealtimeDbLazy() {
   const app = await getApp();
   const { getDatabase } = await import('firebase/database');
