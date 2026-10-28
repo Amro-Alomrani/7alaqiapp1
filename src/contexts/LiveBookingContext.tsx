@@ -271,6 +271,9 @@ export function LiveBookingProvider({ children }: { children: ReactNode }) {
       reminderTimers.current.set(id, reminderTimer);
     }
 
+    // Callers that provide a presetId have already created the Firestore booking
+    // and notification before adding it to the local live-booking context.
+    // Persisting it again here would emit a duplicate booking notification.
     if (!presetId && customer?.uid) {
       void import('@/lib/db').then(({ createBooking: dbCreate }) =>
         dbCreate({

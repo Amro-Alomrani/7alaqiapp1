@@ -60,7 +60,7 @@ service cloud.firestore {
         && request.resource.data.barberId is string
         && exists(/databases/$(database)/documents/barbers/$(request.resource.data.barberId))
         && get(/databases/$(database)/documents/barbers/$(request.resource.data.barberId)).data.isLive == true
-        && request.resource.data.service in get(/databases/$(database)/documents/barbers/$(request.resource.data.barberId)).data.services
+        && get(/databases/$(database)/documents/barbers/$(request.resource.data.barberId)).data.services.hasAny([request.resource.data['service']])
         && request.resource.data.keys().hasOnly([
           'customerUid', 'customerName', 'customerPhone', 'customerAvatar', 'barberId',
           'barberName', 'barberShop', 'barberAvatar', 'staffId', 'staffName', 'staffAvatar',
@@ -68,7 +68,7 @@ service cloud.firestore {
           'notes', 'customerLocation', 'customerLocationUpdatedAt', 'homeServiceFee', 'homeService', 'createdAt', 'updatedAt'
         ])
         && request.resource.data.totalPrice is number
-        && request.resource.data.service.price is number
+        && request.resource.data['service']['price'] is number
         && request.resource.data.get('tip', 0) is number
         && request.resource.data.get('tip', 0) >= 0
         && request.resource.data.get('homeServiceFee', 0) is number
@@ -79,7 +79,7 @@ service cloud.firestore {
             && request.resource.data.get('homeServiceFee', 0) == get(/databases/$(database)/documents/barbers/$(request.resource.data.barberId)).data.get('homeServiceFee', 0))
           || (request.resource.data.get('homeService', false) == false
             && request.resource.data.get('homeServiceFee', 0) == 0))
-        && request.resource.data.totalPrice == request.resource.data.service.price + request.resource.data.get('tip', 0) + request.resource.data.get('homeServiceFee', 0)
+        && request.resource.data.totalPrice == request.resource.data['service']['price'] + request.resource.data.get('tip', 0) + request.resource.data.get('homeServiceFee', 0)
         && request.resource.data.pointsEarned == 0
         && request.resource.data.payMethod in ['cash'];
       allow update: if signedIn() && (
