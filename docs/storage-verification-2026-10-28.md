@@ -23,6 +23,6 @@ Scope: new image uploads use Supabase Storage. Firebase Authentication and Fires
 
 ## Limits
 
-The tests used disposable accounts and a non-public booking on the real services. They were not an Android-device or notification test. The required Firebase account-deletion/push functions are not deployed, and the project currently has billing disabled. These storage results do not certify Google Play readiness for the whole application.
+The tests used disposable accounts and a non-public booking on the real services. They were not an Android-device test. Account deletion and the booking push worker now run from Supabase Edge Functions because the Firebase project has billing disabled; actual push delivery still requires a physical device with a registered FCM token.
 
 The bootstrap secret provided in the chat is not in source control or the client bundle. The deployed Edge Function uses the server credential supplied by the Supabase runtime. Revoke the exposed bootstrap secret after the integration check.
