@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSafeBack } from "@/hooks/useSafeBack";
 import { Capacitor } from '@capacitor/core';
 import { useNavigate } from 'react-router-dom';
@@ -59,6 +59,19 @@ export default function RegisterPage() {
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [referralCode, setReferralCode] = useState('');
+  const locationRequest = useRef<AbortController | null>(null);
+
+  useEffect(() => () => { locationRequest.current?.abort(); }, []);
+
+  const cancelLocation = () => {
+    locationRequest.current?.abort();
+    locationRequest.current = null;
+    setLocating(false);
+  };
+  const selectCoordinates = (position: { lat: number; lng: number }) => {
+    cancelLocation();
+    setCoords(position);
+  };
 
 
   const fullPhone = () => {
@@ -68,20 +81,34 @@ export default function RegisterPage() {
 
   const captureLocation = () => {
     if (locating) return;
+    const request = new AbortController();
+    locationRequest.current = request;
     setLocating(true);
     const isNative = Capacitor.isNativePlatform();
     void getCurrentLocation({
-      // Ask the browser/device for its best fix first; the shared helper falls
-      // back to a recent approximate fix when GPS is unavailable.
-      enableHighAccuracy: true,
-      timeout: isNative ? 30000 : 20000,
+      // Desktop browsers can use their network location without waiting for
+      // a GPS receiver. The returned real pin is shown for salon verification.
+      enableHighAccuracy: isNative,
+      timeout: isNative ? 20000 : 8000,
       maximumAge: isNative ? 0 : 30000,
+      signal: request.signal,
     }).then(pos => {
+      if (request.signal.aborted) return;
       setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      setMapPickerOpen(true);
       toast.success(ar ? '📍 تم تحديد موقع الصالون' : '📍 Salon location captured');
-    }).catch(() => {
-      toast.error(ar ? 'تعذر تحديد الموقع' : 'Could not determine location');
-    }).finally(() => setLocating(false));
+    }).catch(error => {
+      if (request.signal.aborted) return;
+      setMapPickerOpen(true);
+      toast.error(error?.code === 1
+        ? (ar ? 'اسمح بالوصول إلى الموقع ثم حاول مجددًا.' : 'Allow location access and try again.')
+        : (ar ? 'تعذر تحديد الموقع تلقائيًا. حدّد نقطة الصالون على الخريطة.' : 'Automatic location is unavailable. Choose the salon pin on the map.'));
+    }).finally(() => {
+      if (locationRequest.current === request) {
+        locationRequest.current = null;
+        setLocating(false);
+      }
+    });
   };
 
   const canSubmit = () => {
@@ -187,7 +214,7 @@ export default function RegisterPage() {
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <button
-            onClick={() => setRole('customer')}
+            onClick={() => { cancelLocation(); setRole('customer'); }}
             className={`rounded-2xl p-4 border-2 text-center transition-all ${role === 'customer' ? 'border-primary bg-primary/10' : 'border-border bg-card'}`}
           >
             <User size={22} className={`mx-auto mb-1 ${role === 'customer' ? 'text-primary' : 'text-muted-foreground'}`} />
@@ -195,7 +222,7 @@ export default function RegisterPage() {
             <p className="text-[10px] text-muted-foreground">{ar ? 'للحجز والمتابعة' : 'Book & follow'}</p>
           </button>
           <button
-            onClick={() => setRole('barber')}
+            onClick={() => { cancelLocation(); setRole('barber'); }}
             className={`rounded-2xl p-4 border-2 text-center transition-all ${role === 'barber' ? 'border-primary bg-primary/10' : 'border-border bg-card'}`}
           >
             <Scissors size={22} className={`mx-auto mb-1 ${role === 'barber' ? 'text-primary' : 'text-muted-foreground'}`} />
@@ -268,7 +295,7 @@ export default function RegisterPage() {
                 ? <><Loader2 size={16} className="animate-spin" /> {ar ? 'جاري التحديد...' : 'Locating...'}</>
                 : coords
                   ? <><MapPin size={16} /> {ar ? `📍 الموقع جاهز (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})` : `📍 Location set (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})`}</>
-                  : <><MapPin size={16} /> {ar ? 'حدد موقع الصالون على الخريطة' : 'Capture salon location'}</>}
+                  : <><MapPin size={16} /> {ar ? 'استخدم موقعي الحالي' : 'Use my current location'}</>}
             </button>
             {role === 'barber' && (
               <div className="-mt-2 space-y-2">
@@ -290,8 +317,12 @@ export default function RegisterPage() {
                       style={{ height: 240, width: '100%' }} scrollWheelZoom>
                       <MapTileLayer />
                       <CenterSelectedLocation position={coords} />
-                      <RegisterMapPicker onPick={position => setCoords(position)} />
-                      {coords && <Marker position={[coords.lat, coords.lng]} icon={PICKER_ICON} />}
+                      <RegisterMapPicker onPick={selectCoordinates} />
+                      {coords && <Marker position={[coords.lat, coords.lng]} icon={PICKER_ICON} draggable
+                        eventHandlers={{ dragend: event => {
+                          const point = (event.target as L.Marker).getLatLng();
+                          selectCoordinates({ lat: point.lat, lng: point.lng });
+                        } }} />}
                     </MapContainer>
                     {coords && <p className="bg-card px-3 py-2 text-center text-xs font-bold text-primary">
                       {ar ? `تم حفظ النقطة: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}` : `Selected: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`}

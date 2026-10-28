@@ -1,4 +1,7 @@
 import { Capacitor } from '@capacitor/core';
+import { runLocationRequest } from './location-request.ts';
+
+export interface DeviceLocationOptions extends PositionOptions { signal?: AbortSignal }
 
 export interface DevicePosition {
   coords: {
@@ -50,7 +53,7 @@ function normalizeLocationError(error: unknown): DeviceLocationError {
 }
 
 function logLocationError(error: DeviceLocationError) {
-  if (import.meta.env.DEV) {
+  if (import.meta.env?.DEV) {
     console.warn('[location] request failed', { code: error.code, nativeCode: error.nativeCode });
   }
 }
@@ -71,48 +74,57 @@ function fromNative(position: {
     throw { code: 2, message: 'The location provider returned invalid coordinates.' } satisfies DeviceLocationError;
   }
   return {
-    coords: { ...position, altitudeAccuracy: position.altitudeAccuracy ?? null },
+    // Browser GeolocationCoordinates exposes prototype getters; spreading it
+    // would silently lose latitude and longitude.
+    coords: {
+      latitude: position.latitude, longitude: position.longitude, accuracy: position.accuracy,
+      altitude: position.altitude, altitudeAccuracy: position.altitudeAccuracy ?? null,
+      heading: position.heading, speed: position.speed,
+    },
     timestamp,
   };
 }
 
-function browserPosition(options: PositionOptions): Promise<DevicePosition> {
+function browserPosition(options: PositionOptions, signal?: AbortSignal): Promise<DevicePosition> {
   if (!navigator.geolocation) {
     return Promise.reject({ code: 2, message: 'Geolocation is unavailable.' } satisfies DeviceLocationError);
   }
   const timeout = options.timeout ?? 15_000;
-  const request = new Promise<DevicePosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(
-    position => resolve(position),
+  return runLocationRequest(() => new Promise<DevicePosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(
+    position => {
+      try { resolve(fromNative(position.coords, position.timestamp)); }
+      catch (error) { reject(error); }
+    },
     error => reject(normalizeLocationError(error)),
     { ...options, timeout },
-  ));
-  return request;
+  )), timeout, signal);
 }
 
-export async function getCurrentLocation(options: PositionOptions = {}): Promise<DevicePosition> {
+export async function getCurrentLocation(options: DeviceLocationOptions = {}): Promise<DevicePosition> {
+  const { signal } = options;
   const requestedHighAccuracy = options.enableHighAccuracy ?? false;
-  const timeout = options.timeout ?? 20_000;
+  const timeout = Math.max(1, Math.min(options.timeout ?? 15_000, 60_000));
+  const deadline = Date.now() + timeout;
+  const remaining = () => Math.max(1, deadline - Date.now());
   const maximumAge = options.maximumAge ?? 30_000;
 
   if (!Capacitor.isNativePlatform()) {
     try {
       return await browserPosition({
-        ...options,
         enableHighAccuracy: requestedHighAccuracy,
-        timeout: requestedHighAccuracy ? Math.min(timeout, 12_000) : timeout,
+        timeout: requestedHighAccuracy ? Math.max(1, Math.floor(timeout * 0.65)) : timeout,
         maximumAge,
-      });
+      }, signal);
     } catch (error) {
       const normalized = normalizeLocationError(error);
       logLocationError(normalized);
-      if (!requestedHighAccuracy || !canRetryWithApproximate(normalized)) throw normalized;
+      if (signal?.aborted || !requestedHighAccuracy || !canRetryWithApproximate(normalized) || Date.now() >= deadline) throw normalized;
       try {
         return await browserPosition({
-          ...options,
           enableHighAccuracy: false,
-          timeout: Math.max(5_000, Math.min(timeout, 10_000)),
-          maximumAge: Math.max(maximumAge, 60_000),
-        });
+          timeout: remaining(),
+          maximumAge,
+        }, signal);
       } catch (fallbackError) {
         const fallback = normalizeLocationError(fallbackError);
         logLocationError(fallback);
@@ -121,29 +133,29 @@ export async function getCurrentLocation(options: PositionOptions = {}): Promise
     }
   }
 
-  const { Geolocation } = await import('@capacitor/geolocation');
+  const { Geolocation } = await runLocationRequest(() => import('@capacitor/geolocation'), remaining(), signal);
   const getPosition = async (enableHighAccuracy: boolean, attemptTimeout: number, age: number) => {
     // Let the Capacitor plugin handle permission and location-settings flows.
     // Calling checkPermissions() first can fail early while device Location is off.
-    const position = await Geolocation.getCurrentPosition({
+    const position = await runLocationRequest(() => Geolocation.getCurrentPosition({
       enableHighAccuracy,
       timeout: attemptTimeout,
       maximumAge: age,
-    });
+    }), Math.min(attemptTimeout, remaining()), signal);
     return fromNative(position.coords, position.timestamp);
   };
 
   // Native GPS often needs longer than a browser estimate for a cold fix.
   // Honor the caller's bounded timeout instead of cutting every GPS request to 15s.
-  const primaryTimeout = timeout;
+  const primaryTimeout = requestedHighAccuracy ? Math.max(1, Math.floor(remaining() * 0.7)) : remaining();
   try {
     return await getPosition(requestedHighAccuracy, primaryTimeout, maximumAge);
   } catch (error) {
     const normalized = normalizeLocationError(error);
     logLocationError(normalized);
-    if (!requestedHighAccuracy || !canRetryWithApproximate(normalized)) throw normalized;
+    if (signal?.aborted || !requestedHighAccuracy || !canRetryWithApproximate(normalized) || Date.now() >= deadline) throw normalized;
     try {
-      return await getPosition(false, Math.max(8_000, Math.min(timeout, 10_000)), Math.max(maximumAge, 60_000));
+      return await getPosition(false, remaining(), maximumAge);
     } catch (fallbackError) {
       const fallback = normalizeLocationError(fallbackError);
       logLocationError(fallback);
