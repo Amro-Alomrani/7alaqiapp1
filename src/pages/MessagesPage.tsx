@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSafeBack } from "@/hooks/useSafeBack";
 import { ArrowLeft, MessageCircle, Camera, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -54,9 +54,9 @@ export default function MessagesPage() {
   const myUid = customer?.uid || barberUser?.uid || '';
   const isBarber = !!barberUser;
 
-  const myBookings = allBookings.filter(b =>
+  const myBookings = useMemo(() => allBookings.filter(b =>
     isBarber ? b.barberId === myUid : b.customerId === myUid
-  ).sort((a, b) => b.createdAt - a.createdAt);
+  ).sort((a, b) => b.createdAt - a.createdAt), [allBookings, isBarber, myUid]);
 
   useEffect(() => {
     if (myBookings.length === 0) { setConvMeta([]); return; }
@@ -110,7 +110,7 @@ export default function MessagesPage() {
     setConvMeta(Array.from(metaMap.values()));
 
     return () => unsubs.forEach(u => u());
-  }, [myBookings.length, myUid, ar]);
+  }, [myBookings, myUid, ar, isBarber]);
 
   const chatPath = (bookingId: string) =>
     isBarber ? `/barber/chat/${bookingId}` : `/booking-chat/${bookingId}`;

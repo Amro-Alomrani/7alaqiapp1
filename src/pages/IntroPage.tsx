@@ -469,12 +469,12 @@ export default function IntroPage() {
     if (!authReady) return;
     if (isCustomerLoggedIn) { navigate('/', { replace: true }); return; }
     if (isBarberLoggedIn) { navigate('/barber', { replace: true }); return; }
-  }, [authReady, isCustomerLoggedIn, isBarberLoggedIn]);
+  }, [authReady, isCustomerLoggedIn, isBarberLoggedIn, navigate]);
 
   const onIntroFinish = useCallback(() => {
     if (isFirstVisit) setPhase('onboarding');
     else navigate('/select-role', { replace: true });
-  }, [isFirstVisit]);
+  }, [isFirstVisit, navigate]);
 
   const finish = () => {
     localStorage.setItem('halaqi_onboarded', '1');

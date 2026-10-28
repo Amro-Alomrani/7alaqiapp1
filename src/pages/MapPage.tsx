@@ -214,18 +214,26 @@ export default function MapPage() {
 
   const selectedBarber = filtered.find(b => b.id === selected);
 
+  const selectedBarberId = selectedBarber?.id;
+  const selectedBarberLat = selectedBarber?.lat;
+  const selectedBarberLng = selectedBarber?.lng;
+
   useEffect(() => {
-    if (!selectedBarber || !userLoc) { setRouteInfo(null); return; }
-    const { lat, lng } = selectedBarber;
-    if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    fetch(`https://router.project-osrm.org/route/v1/driving/${userLoc[1]},${userLoc[0]};${lng},${lat}?overview=false`)
-      .then(r => r.json())
-      .then(d => {
-        const r = d.routes?.[0];
-        if (r) setRouteInfo({ distKm: r.distance / 1000, etaMin: Math.round(r.duration / 60) });
+    if (!selectedBarberId || !userLoc || typeof selectedBarberLat !== 'number' || typeof selectedBarberLng !== 'number') {
+      setRouteInfo(null);
+      return;
+    }
+    const controller = new AbortController();
+    fetch(`https://router.project-osrm.org/route/v1/driving/${userLoc[1]},${userLoc[0]};${selectedBarberLng},${selectedBarberLat}?overview=false`, { signal: controller.signal })
+      .then(response => { if (!response.ok) throw new Error(`Route service returned ${response.status}`); return response.json(); })
+      .then(data => {
+        const route = data.routes?.[0];
+        if (route) setRouteInfo({ distKm: route.distance / 1000, etaMin: Math.round(route.duration / 60) });
+        else setRouteInfo(null);
       })
-      .catch(() => setRouteInfo(null));
-  }, [selectedBarber?.id, userLoc]);
+      .catch(() => { if (!controller.signal.aborted) setRouteInfo(null); });
+    return () => controller.abort();
+  }, [selectedBarberId, selectedBarberLat, selectedBarberLng, userLoc]);
 
   const statusLabel = (s: string) => ({
     available: ar ? 'متاح ✅' : 'Available ✅',

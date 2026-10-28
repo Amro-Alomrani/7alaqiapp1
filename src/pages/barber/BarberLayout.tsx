@@ -66,7 +66,7 @@ export default function BarberLayout() {
       }
     })();
     return () => { cancelled = true; };
-  }, [uid, isOnboardingPage]);
+  }, [uid, isOnboardingPage, onboarded, navigate]);
 
   if (!uid) return null;
 

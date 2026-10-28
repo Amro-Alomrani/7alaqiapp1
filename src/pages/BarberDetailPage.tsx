@@ -45,11 +45,11 @@ export default function BarberDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    if (!barber || !customer?.uid) return;
+    if (!id || !customer?.uid) return;
     let cancelled = false;
-    fsIsFollowing(customer.uid, barber.id).then(v => { if (!cancelled) setFollowing(v); }).catch(() => {});
+    fsIsFollowing(customer.uid, id).then(v => { if (!cancelled) setFollowing(v); }).catch(() => {});
     return () => { cancelled = true; };
-  }, [barber?.id, customer?.uid]);
+  }, [id, customer?.uid]);
 
   const toggleFollow = async () => {
     if (!barber) return;

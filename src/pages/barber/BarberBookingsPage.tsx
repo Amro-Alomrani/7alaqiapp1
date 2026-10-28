@@ -61,10 +61,11 @@ export default function BarberBookingsPage() {
 
   const filtered = myBookings.filter(b => STATUS_TO_FILTER[b.status] === filter);
   const activeTravelBooking = myBookings.find(b => ['accepted', 'preparing', 'your_turn', 'in_progress'].includes(b.status));
+  const activeTravelBookingId = activeTravelBooking?.id;
 
   useEffect(() => {
     if (!barberId) return;
-    if (!activeTravelBooking) { if (sharingLocation) setSharingLocation(false); return; }
+    if (!activeTravelBookingId) { if (sharingLocation) setSharingLocation(false); return; }
     if (!sharingLocation) return;
     let active = true;
     void watchDeviceLocation(
@@ -101,7 +102,7 @@ export default function BarberBookingsPage() {
       if (locationWatchRef.current) locationWatchRef.current();
       locationWatchRef.current = null;
     };
-  }, [sharingLocation, barberId, activeTravelBooking?.id, ar]);
+  }, [sharingLocation, barberId, activeTravelBookingId, ar]);
 
   const toggleLocationSharing = () => {
     if (sharingLocation) {

@@ -12,7 +12,7 @@ import { pushNotification } from '@/lib/db';
 import { toast } from 'sonner';
 import 'leaflet/dist/leaflet.css';
 
-delete (L.Icon.Default.prototype as any)._getIconUrl;
+delete (L.Icon.Default.prototype as L.Icon.Default & { _getIconUrl?: string })._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: '/marker-icon-2x.png',
   iconUrl: '/marker-icon.png',
@@ -35,13 +35,17 @@ const salonIcon = new L.DivIcon({
 
 function FitBounds({ points }: { points: [number, number][] }) {
   const map = useMap();
+  const firstLat = points[0]?.[0];
+  const firstLng = points[0]?.[1];
+  const secondLat = points[1]?.[0];
+  const secondLng = points[1]?.[1];
   useEffect(() => {
-    if (points.length >= 2) {
-      map.fitBounds(L.latLngBounds(points.map(p => L.latLng(p[0], p[1]))), { padding: [80, 80] });
-    } else if (points.length === 1) {
-      map.setView(points[0], 14);
+    if (firstLat !== undefined && firstLng !== undefined && secondLat !== undefined && secondLng !== undefined) {
+      map.fitBounds(L.latLngBounds([[firstLat, firstLng], [secondLat, secondLng]]), { padding: [80, 80] });
+    } else if (firstLat !== undefined && firstLng !== undefined) {
+      map.setView([firstLat, firstLng], 14);
     }
-  }, [points, map]);
+  }, [firstLat, firstLng, secondLat, secondLng, map]);
   return null;
 }
 
@@ -64,9 +68,13 @@ export default function BarberCustomerMapPage() {
   const { language } = useLanguage();
   const ar = language === 'ar';
   const booking = allBookings.find(b => b.id === bookingId);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const [routePoints, setRoutePoints] = useState<[number, number][]>([]);
   const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
+  const customerLat = booking?.customerLocation?.lat;
+  const customerLng = booking?.customerLocation?.lng;
+  const salonLat = booking?.salonLocation?.lat;
+  const salonLng = booking?.salonLocation?.lng;
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000);
@@ -74,12 +82,10 @@ export default function BarberCustomerMapPage() {
   }, []);
 
   useEffect(() => {
-    const customer = booking?.customerLocation;
-    const salon = booking?.salonLocation;
-    if (!customer || !salon) { setRoutePoints([]); setEtaMinutes(null); return; }
+    if (typeof customerLat !== 'number' || typeof customerLng !== 'number' || typeof salonLat !== 'number' || typeof salonLng !== 'number') return;
     let cancelled = false;
-    const from: [number, number] = [salon.lat, salon.lng];
-    const to: [number, number] = [customer.lat, customer.lng];
+    const from: [number, number] = [salonLat, salonLng];
+    const to: [number, number] = [customerLat, customerLng];
     fetch(`https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`)
       .then(response => response.json())
       .then(data => {
@@ -99,29 +105,9 @@ export default function BarberCustomerMapPage() {
         setEtaMinutes(Math.max(1, Math.round(distanceKm(from, to) / 25 * 60)));
       });
     return () => { cancelled = true; };
-  }, [booking?.id, booking?.customerLocation?.lat, booking?.customerLocation?.lng, booking?.salonLocation?.lat, booking?.salonLocation?.lng]);
+  }, [bookingId, customerLat, customerLng, salonLat, salonLng]);
 
-  useEffect(() => {
-    if (!booking?.customerId) return;
-    const interval = setInterval(() => {
-      const b = booking;
-      if (!b?.customerId) return;
-      const cPos: [number, number] | null = b.customerLocation ? [b.customerLocation.lat, b.customerLocation.lng] : null;
-      const sPos: [number, number] = b.salonLocation ? [b.salonLocation.lat, b.salonLocation.lng] : [31.9539, 35.9106];
-      const dist = cPos ? distanceKm(cPos, sPos).toFixed(1) : null;
-      void pushNotification(b.customerId, {
-        type: 'booking_update',
-        title: `📍 ${barberUser?.name || (ar ? 'الحلاق' : 'Barber')}`,
-        body: dist
-          ? (ar ? `ينتظرك في الصالون — أنت على بُعد ${dist} كم` : `Waiting for you at salon — you're ${dist} km away`)
-          : (ar ? 'يرجى التوجه للصالون' : 'Please head to the salon'),
-        fromUid: barberUser?.uid || '',
-        fromName: barberUser?.name || '',
-        bookingId: b.id,
-      });
-    }, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [booking?.customerId, booking?.id]);
+
 
   if (!booking) {
     return (
@@ -146,7 +132,6 @@ export default function BarberCustomerMapPage() {
   const points: [number, number][] = customerPos && salonPos ? [customerPos, salonPos] : customerPos ? [customerPos] : salonPos ? [salonPos] : [];
   const distance = customerPos && salonPos ? distanceKm(customerPos, salonPos).toFixed(1) : null;
 
-  const bookedAtMs = booking.createdAt;
   const minutesAgo = booking.customerLocationUpdatedAt ? Math.max(0, Math.floor((now - booking.customerLocationUpdatedAt) / 60000)) : null;
   const lastSeenLabel = minutesAgo === null
     ? (ar ? 'موقع العميل غير متاح' : 'Customer location unavailable')
@@ -196,7 +181,7 @@ export default function BarberCustomerMapPage() {
         <FitBounds points={points} />
         {customerPos && <Marker position={customerPos} icon={customerIcon} />}
         {salonPos && <Marker position={salonPos} icon={salonIcon} />}
-        {routePoints.length > 1 && (
+        {customerPos && salonPos && routePoints.length > 1 && (
           <Polyline
             positions={routePoints}
             pathOptions={{ color: '#3b82f6', weight: 4, dashArray: '10,6', opacity: 0.85 }}
@@ -220,7 +205,7 @@ export default function BarberCustomerMapPage() {
             </div>
           </div>
           <div className="text-center">
-            <p className="text-sm font-bold text-foreground">{etaMinutes !== null ? `${etaMinutes} ${ar ? 'دقيقة' : 'min'}` : '—'}</p>
+            <p className="text-sm font-bold text-foreground">{customerPos && salonPos && etaMinutes !== null ? `${etaMinutes} ${ar ? 'دقيقة' : 'min'}` : '—'}</p>
             <p className="text-xs text-muted-foreground">{ar ? 'وصول تقريبي' : 'Approx. ETA'}</p>
           </div>
           <div className="text-right">

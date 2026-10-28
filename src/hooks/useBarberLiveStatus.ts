@@ -25,22 +25,20 @@ export function useBarberLiveStatus(barber: Barber | undefined): LiveBarberStatu
     return off;
   }, [barber]);
 
-  return useMemo<LiveBarberStatus>(() => {
-    if (!barber) return { status: 'busy', isOverridden: false };
-    const override = getBarberStatusOverride(barber.id);
-    if (override) {
-      return {
-        status: override.status,
-        liveEta: override.liveEta,
-        liveActivity: override.liveActivity,
-        isOverridden: true,
-      };
-    }
+  if (!barber) return { status: 'busy', isOverridden: false };
+  const override = getBarberStatusOverride(barber.id);
+  if (override) {
     return {
-      status: barber.liveStatus,
-      liveEta: barber.liveEta,
-      liveActivity: barber.liveActivity,
-      isOverridden: false,
+      status: override.status,
+      liveEta: override.liveEta,
+      liveActivity: override.liveActivity,
+      isOverridden: true,
     };
-  }, [barber, getBarberStatusOverride(barber?.id || '')?.updatedAt]);
+  }
+  return {
+    status: barber.liveStatus,
+    liveEta: barber.liveEta,
+    liveActivity: barber.liveActivity,
+    isOverridden: false,
+  };
 }

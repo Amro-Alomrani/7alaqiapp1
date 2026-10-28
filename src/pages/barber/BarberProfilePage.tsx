@@ -51,12 +51,12 @@ export default function BarberProfilePage() {
   const [savingPost, setSavingPost] = useState(false);
 
   useEffect(() => {
-    if (!barber) return;
+    if (!barber || editing) return;
     setShopName(barber.shopName || '');
-    setBio((barber as any).description || '');
+    setBio(barber.description || '');
     setName(barber.name || '');
     setHomeServiceFeeDraft(String(barber.homeServiceFee ?? 0));
-  }, [barber?.id]);
+  }, [barber?.id, barber?.shopName, barber?.description, barber?.name, barber?.homeServiceFee, editing]);
 
   const handleAvatar = async () => {
     if (!uid) return;

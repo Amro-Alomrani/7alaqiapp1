@@ -22,6 +22,7 @@ export default function QRScanPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
+  const handleDecodeRef = useRef<(text: string) => void>(() => undefined);
 
   const [scanState, setScanState] = useState<ScanState>('idle');
   const [result, setResult] = useState<{ barberId: string; barberName?: string; points: number } | null>(null);
@@ -53,7 +54,7 @@ export default function QRScanPage() {
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
     if (code?.data) {
-      handleDecode(code.data);
+      void handleDecodeRef.current(code.data);
       return;
     }
     rafRef.current = requestAnimationFrame(tick);
@@ -107,6 +108,8 @@ export default function QRScanPage() {
       setScanState('error');
     }
   };
+
+  handleDecodeRef.current = handleDecode;
 
   const startScan = useCallback(async () => {
     if (!customer) { toast.error(ar ? 'يجب تسجيل الدخول' : 'Please sign in first'); return; }

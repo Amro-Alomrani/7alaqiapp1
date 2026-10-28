@@ -7,13 +7,12 @@ import L from 'leaflet';
 import { ArrowLeft, Navigation, Phone, MessageCircle, MapPin, Clock, Wifi } from 'lucide-react';
 import { useLiveBooking } from '@/contexts/LiveBookingContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useAuth } from '@/contexts/AuthContext';
-import { LiveBarberLocation, pushNotification, subscribeBarberLiveLocation, updateCustomerLocation } from '@/lib/db';
+import { LiveBarberLocation, subscribeBarberLiveLocation, updateCustomerLocation } from '@/lib/db';
 import 'leaflet/dist/leaflet.css';
 import { watchDeviceLocation } from '@/lib/location';
 import { toast } from 'sonner';
 
-delete (L.Icon.Default.prototype as any)._getIconUrl;
+delete (L.Icon.Default.prototype as L.Icon.Default & { _getIconUrl?: string })._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: '/marker-icon-2x.png',
   iconUrl: '/marker-icon.png',
@@ -36,11 +35,15 @@ const SALON_ICON = new L.DivIcon({
 
 function FitBounds({ points }: { points: [number, number][] }) {
   const map = useMap();
+  const firstLat = points[0]?.[0];
+  const firstLng = points[0]?.[1];
+  const secondLat = points[1]?.[0];
+  const secondLng = points[1]?.[1];
   useEffect(() => {
-    if (points.length >= 2) {
-      map.fitBounds(L.latLngBounds(points.map(p => L.latLng(p[0], p[1]))), { padding: [80, 80] });
+    if (firstLat !== undefined && firstLng !== undefined && secondLat !== undefined && secondLng !== undefined) {
+      map.fitBounds(L.latLngBounds([[firstLat, firstLng], [secondLat, secondLng]]), { padding: [80, 80] });
     }
-  }, [points.join(','), map]);
+  }, [firstLat, firstLng, secondLat, secondLng, map]);
   return null;
 }
 
@@ -59,42 +62,48 @@ export default function TrackingPage() {
   const safeBack = useSafeBack();
   const { activeBooking } = useLiveBooking();
   const { language } = useLanguage();
-  const { customer } = useAuth();
   const ar = language === 'ar';
 
-  const [userPos, setUserPos] = useState<[number, number] | null>(null);
+  const [devicePos, setDevicePos] = useState<[number, number] | null>(null);
   const [routePoints, setRoutePoints] = useState<[number, number][]>([]);
   const [distKm, setDistKm] = useState<string | null>(null);
   const [etaMin, setEtaMin] = useState<number | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [barberLocation, setBarberLocation] = useState<LiveBarberLocation | null>(null);
+  const [clockNow, setClockNow] = useState(() => Date.now());
 
   const watchIdRef = useRef<(() => void) | null>(null);
-  const notifIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastFsWriteRef = useRef<number>(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => setClockNow(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   const salonPos: [number, number] | null = barberLocation
     ? [barberLocation.lat, barberLocation.lng]
     : activeBooking?.salonLocation
       ? [activeBooking.salonLocation.lat, activeBooking.salonLocation.lng]
       : null;
-  const barberLive = !!barberLocation && Date.now() - barberLocation.updatedAt < 60_000;
+  const barberLive = !!barberLocation && clockNow - barberLocation.updatedAt < 60_000;
 
   useEffect(() => {
     if (!activeBooking?.barberId) return;
     return subscribeBarberLiveLocation(activeBooking.barberId, setBarberLocation);
   }, [activeBooking?.barberId]);
 
-  useEffect(() => {
-    if (activeBooking?.customerLocation) {
-      setUserPos([activeBooking.customerLocation.lat, activeBooking.customerLocation.lng]);
-    }
-  }, [activeBooking?.id, activeBooking?.customerLocation?.lat, activeBooking?.customerLocation?.lng]);
+  const bookingCustomerLat = activeBooking?.customerLocation?.lat;
+  const bookingCustomerLng = activeBooking?.customerLocation?.lng;
+  const bookedCustomerPos: [number, number] | null = typeof bookingCustomerLat === 'number' && typeof bookingCustomerLng === 'number'
+    ? [bookingCustomerLat, bookingCustomerLng]
+    : null;
+  const userPos = devicePos || bookedCustomerPos;
 
-  const fetchRoute = useCallback(async (from: [number, number], to: [number, number]) => {
+  const fetchRoute = useCallback(async (from: [number, number], to: [number, number], signal?: AbortSignal) => {
     try {
       const url = `https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`;
-      const res = await fetch(url);
+      const res = await fetch(url, { signal });
+      if (!res.ok) throw new Error(`Route service returned ${res.status}`);
       const data = await res.json();
       if (data.code === 'Ok' && data.routes?.[0]) {
         const coords: [number, number][] = data.routes[0].geometry.coordinates.map((c: number[]) => [c[1], c[0]]);
@@ -105,6 +114,7 @@ export default function TrackingPage() {
         setEtaMin(Math.max(1, Math.round((km / speed) * 60)));
       }
     } catch {
+      if (signal?.aborted) return;
       setRoutePoints([from, to]);
       const km = distanceKm(from, to);
       setDistKm(km.toFixed(1));
@@ -120,24 +130,10 @@ export default function TrackingPage() {
     try {
       await updateCustomerLocation(activeBooking.id, lat, lng);
       setLastUpdated(new Date());
-    } catch {  }
-  }, [activeBooking?.id]);
-
-  const sendBarberNotif = useCallback(() => {
-    if (!activeBooking?.barberId || !customer?.uid) return;
-    const dist = distKm ? `${distKm} km` : '?';
-    const eta = etaMin ? `${etaMin} ${ar ? 'دقيقة' : 'min'}` : '?';
-    void pushNotification(activeBooking.barberId, {
-      type: 'message',
-      title: `📍 ${customer.name || (ar ? 'العميل' : 'Customer')}`,
-      body: ar
-        ? `يبعد ${dist} — يصل خلال ${eta} تقريباً`
-        : `Is ${dist} away — ETA ~${eta}`,
-      fromUid: customer.uid,
-      fromName: customer.name || '',
-      bookingId: activeBooking.id,
-    });
-  }, [activeBooking, customer, distKm, etaMin, ar]);
+    } catch {
+      toast.error(ar ? 'تعذر حفظ تحديث الموقع للحجز' : 'Could not save the location update');
+    }
+  }, [activeBooking, ar]);
 
   useEffect(() => {
     let active = true;
@@ -146,7 +142,7 @@ export default function TrackingPage() {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
         const p: [number, number] = [lat, lng];
-        setUserPos(p);
+        setDevicePos(p);
         writeLocationToFs(lat, lng);
       },
       err => {
@@ -156,7 +152,9 @@ export default function TrackingPage() {
     ).then(stop => {
       if (active) watchIdRef.current = stop;
       else stop();
-    }).catch(() => {});
+    }).catch(() => {
+      if (active) toast.error(ar ? 'تعذر بدء تحديث الموقع المباشر' : 'Could not start live location updates');
+    });
     return () => {
       active = false;
       if (watchIdRef.current) watchIdRef.current();
@@ -164,14 +162,20 @@ export default function TrackingPage() {
     };
   }, [writeLocationToFs, ar]);
 
+  const salonLat = salonPos?.[0];
+  const salonLng = salonPos?.[1];
   useEffect(() => {
-    if (userPos && salonPos) void fetchRoute(userPos, salonPos);
-  }, [userPos, salonPos?.[0], salonPos?.[1], fetchRoute]);
+    if (!userPos || typeof salonLat !== 'number' || typeof salonLng !== 'number') return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void fetchRoute(userPos, [salonLat, salonLng], controller.signal);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [userPos, salonLat, salonLng, fetchRoute]);
 
-  useEffect(() => {
-    notifIntervalRef.current = setInterval(sendBarberNotif, 5 * 60 * 1000);
-    return () => { if (notifIntervalRef.current) clearInterval(notifIntervalRef.current); };
-  }, [sendBarberNotif]);
 
   if (!activeBooking) {
     return (

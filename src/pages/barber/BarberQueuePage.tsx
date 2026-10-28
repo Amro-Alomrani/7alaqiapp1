@@ -1,141 +1,103 @@
-import { useState } from 'react';
-import { Users, ChevronUp, ChevronDown, Bell, CheckCircle } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Bell, CheckCircle, Play, Users } from 'lucide-react';
 import { useLiveBooking } from '@/contexts/LiveBookingContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { BarberQueueItem } from '@/types';
-import { Button } from '@/components/ui/button';
+import { pushNotification } from '@/lib/db';
 import { toast } from 'sonner';
-
-function QueueCard({ item, onMoveUp, onMoveDown, onComplete, isFirst, isLast, ar }:
-  { item: BarberQueueItem; onMoveUp: () => void; onMoveDown: () => void; onComplete: () => void; isFirst: boolean; isLast: boolean; ar: boolean }) {
-  const isActive = item.status === 'in_service';
-  return (
-    <motion.div layout className={`flex items-center gap-3 p-4 rounded-2xl border-2 ${isActive ? 'border-primary bg-primary/10' : 'border-border bg-card'}`}>
-      <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-        style={{ background: isActive ? 'hsl(var(--primary)/0.2)' : 'hsl(var(--secondary))' }}>
-        <span className={`text-sm font-black ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>{item.position}</span>
-      </div>
-      <img src={item.customerAvatar} alt={item.customerName} className="w-10 h-10 rounded-xl object-cover flex-shrink-0" />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <p className="font-bold text-foreground text-sm">{item.customerName}</p>
-          {isActive && <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />}
-        </div>
-        <p className="text-xs text-muted-foreground">{item.serviceName}</p>
-        {item.waitTime > 0 && (
-          <p className="text-xs text-muted-foreground mt-0.5">
-            ~{item.waitTime} {ar ? 'دقيقة انتظار' : 'min wait'}
-          </p>
-        )}
-      </div>
-      <div className="flex items-center gap-1">
-        {!isActive && (
-          <>
-            <button onClick={onMoveUp} disabled={isFirst} className="w-7 h-7 bg-secondary rounded-lg flex items-center justify-center disabled:opacity-30">
-              <ChevronUp size={14} />
-            </button>
-            <button onClick={onMoveDown} disabled={isLast} className="w-7 h-7 bg-secondary rounded-lg flex items-center justify-center disabled:opacity-30">
-              <ChevronDown size={14} />
-            </button>
-          </>
-        )}
-        {isActive && (
-          <button onClick={onComplete} className="w-8 h-8 bg-primary rounded-xl flex items-center justify-center">
-            <CheckCircle size={16} className="text-primary-foreground" />
-          </button>
-        )}
-      </div>
-    </motion.div>
-  );
-}
 
 export default function BarberQueuePage() {
   const { barberUser } = useAuth();
-  const { getBarberBookings } = useLiveBooking();
+  const { getBarberBookings, startBooking, completeBooking } = useLiveBooking();
   const { language } = useLanguage();
   const ar = language === 'ar';
+  const bookings = getBarberBookings(barberUser?.uid || '');
+  const current = bookings.find(booking => booking.status === 'in_progress');
+  const waiting = bookings
+    .filter(booking => ['accepted', 'preparing', 'your_turn'].includes(booking.status))
+    .sort((a, b) => a.createdAt - b.createdAt);
+  const next = waiting[0];
 
-  const myBookings = getBarberBookings(barberUser?.uid || '');
-  const initialQueue: BarberQueueItem[] = myBookings
-    .filter(b => b.status === 'accepted' || b.status === 'preparing' || b.status === 'your_turn' || b.status === 'in_progress')
-    .map((b, i) => ({
-      id: b.id,
-      position: i + 1,
-      customerName: b.customerName || (ar ? 'عميل' : 'Customer'),
-      customerAvatar: b.customerAvatar || '/logo.png',
-      serviceName: b.service?.name || (ar ? 'خدمة' : 'Service'),
-      waitTime: i * 15,
-      status: b.status === 'in_progress' ? 'in_service' as const : 'waiting' as const,
-    }));
-  const [queue, setQueue] = useState<BarberQueueItem[]>(initialQueue);
-
-  const move = (idx: number, dir: 'up' | 'down') => {
-    const target = dir === 'up' ? idx - 1 : idx + 1;
-    const newQ = [...queue];
-    [newQ[idx], newQ[target]] = [newQ[target], newQ[idx]];
-    setQueue(newQ.map((q, i) => ({ ...q, position: i + 1 })));
+  const notifyNext = async () => {
+    if (!next?.customerId) return;
+    const sent = await pushNotification(next.customerId, {
+      type: 'booking_update',
+      title: `💈 ${barberUser?.shopName || (ar ? 'الصالون' : 'Your barber')}`,
+      body: ar ? 'الحلاق جاهز لاستقبالك. يرجى التوجه للصالون.' : 'The barber is ready for you. Please head to the salon.',
+      fromUid: barberUser?.uid,
+      fromName: barberUser?.name || barberUser?.shopName,
+      bookingId: next.id,
+    });
+    if (sent) toast.success(ar ? 'تم تسجيل الإشعار للحجز' : 'Notification added to the booking');
+    else toast.error(ar ? 'تعذر تسجيل الإشعار. تحقق من الاتصال.' : 'Could not add the notification. Check the connection.');
   };
 
-  const complete = (id: string) => {
-    setQueue(prev =>
-      prev.filter(q => q.id !== id)
-        .map((q, i) => ({ ...q, position: i + 1, status: i === 0 ? 'in_service' as const : 'waiting' as const }))
-    );
-    toast(ar ? '✅ تم إنهاء الخدمة! تم إشعار العميل التالي.' : '✅ Customer marked as done! Next in queue notified.');
+  const startNext = async () => {
+    if (!next) return;
+    const started = await startBooking(next.id);
+    if (!started) toast.error(ar ? 'تعذر تحديث الحجز. حدّث القائمة وحاول مجددًا.' : 'Could not update the booking. Refresh and try again.');
   };
 
-  const callNext = () =>
-    toast(ar ? '📱 تم إشعار العميل التالي: "حان دورك!"' : '📱 SMS sent to next customer: "Your turn is ready!"');
+  const finishCurrent = async () => {
+    if (!current) return;
+    const finished = await completeBooking(current.id);
+    if (!finished) toast.error(ar ? 'تعذر إنهاء الحجز. تحقق من الاتصال وحاول مجددًا.' : 'Could not complete the booking. Check the connection and retry.');
+  };
 
   return (
-    <div className="overflow-y-auto" dir={ar ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen overflow-y-auto pb-28" dir={ar ? 'rtl' : 'ltr'}>
       <div className="px-5 pt-14 pb-5">
-        <div className="flex items-center justify-between mb-2">
-          <h1 className="text-xl font-black text-foreground">{ar ? 'قائمة الانتظار' : 'Live Queue'}</h1>
-          <div className="flex items-center gap-1.5 bg-primary/10 px-3 py-1.5 rounded-full">
+        <div className="mb-2 flex items-center justify-between">
+          <h1 className="text-xl font-black text-foreground">{ar ? 'قائمة الحجوزات' : 'Booking queue'}</h1>
+          <div className="flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1.5">
             <Users size={13} className="text-primary" />
-            <span className="text-sm font-bold text-primary">{queue.length} {ar ? 'في الانتظار' : 'waiting'}</span>
+            <span className="text-sm font-bold text-primary">{waiting.length} {ar ? 'بانتظار الخدمة' : 'waiting'}</span>
           </div>
         </div>
-        {queue.length > 1 && (
-          <p className="text-sm text-muted-foreground">
-            {ar ? 'اسحب لإعادة الترتيب · أكمل للتقدم في القائمة' : 'Drag to reorder · Complete to advance queue'}
-          </p>
+        <p className="text-sm text-muted-foreground">
+          {ar ? 'مرتبة حسب وقت وصول طلب الحجز. التحديثات محفوظة مع حالة الحجز.' : 'Ordered by booking request time. Actions update the saved booking status.'}
+        </p>
+      </div>
+
+      <div className="space-y-3 px-5">
+        {current && (
+          <article className="rounded-2xl border-2 border-primary bg-primary/10 p-4">
+            <p className="mb-1 text-xs font-bold text-primary">{ar ? 'الخدمة الحالية' : 'In service'}</p>
+            <p className="font-bold text-foreground">{current.customerName || (ar ? 'العميل' : 'Customer')}</p>
+            <p className="text-sm text-muted-foreground">{current.service?.name}</p>
+            <button onClick={finishCurrent} className="mt-3 inline-flex h-10 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground">
+              <CheckCircle size={16} /> {ar ? 'إنهاء الخدمة' : 'Complete service'}
+            </button>
+          </article>
         )}
-      </div>
 
-      <div className="px-5 mb-5">
-        <Button onClick={callNext} variant="outline" className="w-full h-11 rounded-2xl gap-2 border-primary/30 text-primary font-bold">
-          <Bell size={16} />
-          {ar ? 'إشعار العميل التالي' : 'Notify Next Customer'}
-        </Button>
-      </div>
+        {waiting.map((booking, index) => (
+          <article key={booking.id} className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-black text-primary">#{index + 1}</span>
+            {booking.customerAvatar ? <img src={booking.customerAvatar} alt="" className="h-10 w-10 rounded-xl object-cover" /> : <div className="h-10 w-10 rounded-xl bg-secondary" />}
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-bold text-foreground">{booking.customerName || (ar ? 'العميل' : 'Customer')}</p>
+              <p className="truncate text-xs text-muted-foreground">{booking.service?.name} · {booking.time}</p>
+            </div>
+            {index === 0 && (
+              <button onClick={startNext} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground">
+                <Play size={14} /> {ar ? 'بدء' : 'Start'}
+              </button>
+            )}
+          </article>
+        ))}
 
-      <div className="px-5 flex flex-col gap-3">
-        <AnimatePresence>
-          {queue.map((item, i) => (
-            <QueueCard
-              key={item.id}
-              item={item}
-              ar={ar}
-              isFirst={i === 0}
-              isLast={i === queue.length - 1}
-              onMoveUp={() => move(i, 'up')}
-              onMoveDown={() => move(i, 'down')}
-              onComplete={() => complete(item.id)}
-            />
-          ))}
-        </AnimatePresence>
-        {queue.length === 0 && (
-          <div className="text-center py-16">
-            <p className="text-4xl mb-3">🎉</p>
-            <p className="font-semibold text-foreground">{ar ? 'القائمة فارغة!' : 'Queue is clear!'}</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {ar ? 'لا يوجد عملاء في الانتظار الآن' : 'No customers waiting right now'}
-            </p>
+        {!current && waiting.length === 0 && (
+          <div className="py-16 text-center">
+            <p className="mb-3 text-4xl">📋</p>
+            <p className="font-semibold text-foreground">{ar ? 'لا توجد حجوزات بانتظار الخدمة' : 'No bookings are waiting'}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{ar ? 'ستظهر الطلبات المقبولة هنا.' : 'Accepted bookings will appear here.'}</p>
           </div>
+        )}
+
+        {next && (
+          <button onClick={notifyNext} className="mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-primary/30 text-sm font-bold text-primary">
+            <Bell size={16} /> {ar ? 'إرسال إشعار داخل التطبيق للعميل التالي' : 'Send an in-app notification to next customer'}
+          </button>
         )}
       </div>
     </div>

@@ -53,7 +53,7 @@ export default function BarberDashboardPage() {
   }, [myBookings]);
 
   const current = myBookings.find(b => b.status === 'in_progress') || null;
-  const waiting = myBookings.filter(b => b.status === 'accepted' || b.status === 'preparing' || b.status === 'your_turn').map((b, i) => ({ ...b, position: i + 1, waitTime: i * 15 }));
+  const waiting = myBookings.filter(b => b.status === 'accepted' || b.status === 'preparing' || b.status === 'your_turn').sort((a, b) => a.createdAt - b.createdAt).map((b, i) => ({ ...b, position: i + 1 }));
   const maxWeeklyAmount = Math.max(0, ...weekData.map(day => day.amount));
 
   const handleNotify = useCallback(async (booking: typeof myBookings[0]) => {
@@ -405,8 +405,8 @@ export default function BarberDashboardPage() {
                     <p className="text-xs text-muted-foreground">{q.service?.name}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-muted-foreground">{ar ? 'انتظار' : 'Wait'}</p>
-                    <p className="text-sm font-bold text-foreground">{q.waitTime}{ar ? 'د' : 'm'}</p>
+                    <p className="text-xs text-muted-foreground">{ar ? 'الترتيب' : 'Position'}</p>
+                    <p className="text-sm font-bold text-foreground">#{q.position}</p>
                   </div>
                   <button onClick={() => handleStart(q.id)} className="bg-primary text-primary-foreground text-xs font-bold px-3 py-2 rounded-xl">
                     {ar ? 'التالي' : 'Next'}

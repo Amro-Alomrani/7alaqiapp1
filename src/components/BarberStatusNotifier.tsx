@@ -55,7 +55,7 @@ export default function BarberStatusNotifier() {
       });
     });
     return off;
-  }, []);
+  }, [allBarbers]);
 
   return null;
 }
