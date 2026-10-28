@@ -1,10 +1,22 @@
-import { getFirestoreLazy } from './firebase';
+import { ensureSupabaseBookingMediaAccess } from './firebase';
+import {
+  getSupabase,
+  PRIVATE_STORAGE_MARKER,
+  SUPABASE_PRIVATE_CHAT_BUCKET,
+  SUPABASE_PUBLIC_MEDIA_BUCKET,
+} from './supabase';
 
-async function storage() {
-  await getFirestoreLazy();
-  const { getStorage } = await import('firebase/storage');
-  const { getApp } = await import('firebase/app');
-  return getStorage(getApp());
+function storageBucketForPath(path: string) {
+  return path.startsWith('chats/') ? SUPABASE_PRIVATE_CHAT_BUCKET : SUPABASE_PUBLIC_MEDIA_BUCKET;
+}
+
+function normalizeStoragePath(path: string) {
+  const normalized = path.replace(/^\/+/, '');
+  const parts = normalized.split('/');
+  if (!normalized || parts.some(part => !part || part === '.' || part === '..')) {
+    throw new Error('Invalid image path.');
+  }
+  return normalized;
 }
 
 export async function uploadImage(
@@ -15,50 +27,68 @@ export async function uploadImage(
   if (file.size === 0) throw new Error('Selected image is empty.');
   if (file.size > 10 * 1024 * 1024) throw new Error('Selected image is over the 10 MB limit.');
   if (file.type && !file.type.startsWith('image/')) throw new Error('Selected file is not an image.');
-  const s = await storage();
-  const { ref, uploadBytesResumable, getDownloadURL } = await import('firebase/storage');
-  const r = ref(s, path);
-  return new Promise((resolve, reject) => {
-    const task = uploadBytesResumable(r, file);
-    const timer = setTimeout(() => {
-      task.cancel();
-      reject(Object.assign(new Error('Image upload timed out. Check your connection and retry.'), { code: 'storage/retry-limit-exceeded' }));
-    }, 45_000);
-    task.on('state_changed',
-      snap => {
-        if (onProgress) onProgress((snap.bytesTransferred / snap.totalBytes) * 100);
-      },
-      error => { clearTimeout(timer); reject(error); },
-      async () => {
-        try {
-          const url = await getDownloadURL(task.snapshot.ref);
-          clearTimeout(timer);
-          resolve(url);
-        } catch (e) { clearTimeout(timer); reject(e); }
-      },
-    );
+  const objectPath = normalizeStoragePath(path);
+  const isChatImage = objectPath.startsWith('chats/');
+  if (isChatImage) {
+    const bookingId = objectPath.split('/')[1];
+    if (!bookingId) throw new Error('A booking is required for a private chat image.');
+    await ensureSupabaseBookingMediaAccess(bookingId);
+  }
+
+  if (onProgress) onProgress(0);
+  const bucketId = storageBucketForPath(objectPath);
+  const { data, error } = await getSupabase().storage.from(bucketId).upload(objectPath, file, {
+    contentType: file.type || 'image/jpeg',
+    cacheControl: '3600',
+    upsert: false,
   });
+  if (error) throw error;
+  if (onProgress) onProgress(100);
+
+  if (isChatImage) return `${PRIVATE_STORAGE_MARKER}${bucketId}/${data.path}`;
+  return getSupabase().storage.from(bucketId).getPublicUrl(data.path).data.publicUrl;
 }
 
 export function describeImageUploadError(error: unknown, arabic = false): string {
-  const err = error as { code?: string; message?: string };
+  const err = error as { code?: string; message?: string; statusCode?: string; name?: string };
   const code = err?.code || '';
-  if (code === 'storage/unauthorized') return 'Firebase Storage denied the upload. Check Storage rules and the signed-in Firebase project.';
-  if (code === 'storage/bucket-not-found' || code === 'storage/no-default-bucket') return 'Firebase Storage bucket is missing or does not match this app configuration.';
+  if (code === 'storage/unauthorized' || err?.statusCode === '403') return 'Storage denied the upload. Check the bucket policies and your signed-in account.';
+  if (code === 'storage/bucket-not-found' || code === 'storage/no-default-bucket' || err?.statusCode === '404') return 'The configured image storage bucket was not found.';
   if (code === 'storage/quota-exceeded' || /quota.*exceed/i.test(err?.message || '')) {
     return arabic
-      ? 'وصل مشروع Firebase إلى حد التخزين المسموح. على مالك المشروع مراجعة استخدام التخزين والفوترة قبل عودة رفع الصور.'
-      : 'Firebase Storage has reached its project quota. The Firebase project owner must review Storage usage and billing before uploads can resume.';
+      ? 'تعذر رفع الصورة بسبب حد التخزين. تحقق من الحصة المتاحة في مشروع التخزين.'
+      : 'The image could not be uploaded because the storage quota was reached. Check the storage project quota.';
   }
-  if (code === 'storage/unauthenticated') return 'Your sign-in expired. Sign in again and retry the upload.';
-  if (code === 'storage/retry-limit-exceeded' || code === 'storage/canceled') return 'Upload was interrupted. Check your connection and retry.';
-  return err?.message || 'Image upload failed. Check Firebase Storage configuration and rules.';
+  if (code === 'storage/unauthenticated' || err?.statusCode === '401') return 'Your sign-in expired. Sign in again and retry the upload.';
+  if (code === 'storage/retry-limit-exceeded' || code === 'storage/canceled' || err?.name === 'AbortError') return 'Upload timed out or was interrupted. Check your connection and retry.';
+  return err?.message || 'Image upload failed. Check the storage configuration and policies.';
 }
 
 export async function deleteImage(path: string): Promise<void> {
-  const s = await storage();
-  const { ref, deleteObject } = await import('firebase/storage');
-  try { await deleteObject(ref(s, path)); } catch { /* Best-effort cleanup; callers can continue without blocking. */ }
+  try {
+    const markerlessPath = path.startsWith(PRIVATE_STORAGE_MARKER)
+      ? path.slice(PRIVATE_STORAGE_MARKER.length)
+      : path;
+    const slash = markerlessPath.indexOf('/');
+    const bucketId = slash > 0 ? markerlessPath.slice(0, slash) : storageBucketForPath(markerlessPath);
+    const objectPath = normalizeStoragePath(slash > 0 ? markerlessPath.slice(slash + 1) : markerlessPath);
+    const { error } = await getSupabase().storage.from(bucketId).remove([objectPath]);
+    if (error) throw error;
+  } catch {
+    // Image cleanup is best-effort; the owning record may already be removed.
+  }
+}
+
+export async function createSignedChatImageUrl(marker: string): Promise<string> {
+  if (!marker.startsWith(PRIVATE_STORAGE_MARKER)) return marker;
+  const rest = marker.slice(PRIVATE_STORAGE_MARKER.length);
+  const slash = rest.indexOf('/');
+  if (slash < 1) throw new Error('Invalid private chat image reference.');
+  const bucketId = rest.slice(0, slash);
+  const objectPath = normalizeStoragePath(rest.slice(slash + 1));
+  const { data, error } = await getSupabase().storage.from(bucketId).createSignedUrl(objectPath, 60 * 60);
+  if (error) throw error;
+  return data.signedUrl;
 }
 
 export function pickImage(accept = 'image/*'): Promise<File | null> {

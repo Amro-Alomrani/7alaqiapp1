@@ -1,5 +1,6 @@
 ﻿import type { Barber, Post, Service, Booking, Review } from '@/types';
 import { getFirestoreLazy } from './firebase';
+import { createSignedChatImageUrl } from './storage';
 
 async function fs() {
   const db = await getFirestoreLazy();
@@ -876,21 +877,35 @@ export function subscribeBookingMessages(
   cb: (messages: (MessageDoc & { id: string })[]) => void
 ) {
   let unsub: (() => void) | null = null;
+  let active = true;
+  let revision = 0;
   (async () => {
     try {
       if (!bookingId) { cb([]); return; }
       const { db, collection, onSnapshot, query, orderBy } = await fs();
       const q = query(collection(db, `messages/${bookingId}/msgs`), orderBy('createdAt', 'asc'));
       unsub = onSnapshot(q,
-        snap => cb(snap.docs.map(d => ({ id: d.id, ...(d.data() as MessageDoc) }))),
-        err => {
-cb([]); }
+        snap => {
+          const currentRevision = ++revision;
+          const messages = snap.docs.map(d => ({ id: d.id, ...(d.data() as MessageDoc) }));
+          void Promise.all(messages.map(async message => {
+            if (!message.imageUrl?.startsWith('supabase-storage://')) return message;
+            try {
+              return { ...message, imageUrl: await createSignedChatImageUrl(message.imageUrl) };
+            } catch {
+              return { ...message, imageUrl: undefined };
+            }
+          })).then(resolved => {
+            if (active && currentRevision === revision) cb(resolved);
+          });
+        },
+        () => { if (active) cb([]); }
       );
     } catch (e) {
-cb([]);
+      if (active) cb([]);
     }
   })();
-  return () => { if (unsub) unsub(); };
+  return () => { active = false; revision += 1; if (unsub) unsub(); };
 }
 
 export interface GalleryImageDoc {

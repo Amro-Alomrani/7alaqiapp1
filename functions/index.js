@@ -5,9 +5,81 @@ const { getStorage } = require('firebase-admin/storage');
 const { getMessaging } = require('firebase-admin/messaging');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore');
+const { defineSecret } = require('firebase-functions/params');
+
+const SUPABASE_URL = 'https://vjeuesqrzywragnjvkpi.supabase.co';
+const SUPABASE_SECRET_KEY = defineSecret('SUPABASE_SECRET_KEY');
+
+async function supabaseAdminRequest(path, options = {}) {
+  const secret = SUPABASE_SECRET_KEY.value();
+  if (!secret) throw new HttpsError('failed-precondition', 'Supabase storage cleanup is not configured.');
+  const response = await fetch(`${SUPABASE_URL}${path}`, {
+    ...options,
+    headers: {
+      apikey: secret,
+      Authorization: `Bearer ${secret}`,
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...options.headers,
+    },
+  });
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 400);
+    console.error('Supabase storage admin request failed', response.status, detail);
+    throw new HttpsError('internal', 'Supabase storage operation failed.');
+  }
+  return response;
+}
+
+async function upsertBookingMediaMembers(bookingId, memberUids) {
+  const rows = memberUids.map(memberUid => ({ booking_id: bookingId, member_uid: memberUid }));
+  await supabaseAdminRequest('/rest/v1/booking_media_members?on_conflict=booking_id,member_uid', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify(rows),
+  });
+}
+
+async function deleteSupabaseStorageObjects(bucketId, prefixes) {
+  if (!prefixes.length) return;
+  await supabaseAdminRequest(`/storage/v1/object/${bucketId}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ prefixes }),
+  });
+}
 
 initializeApp();
 const db = getFirestore();
+
+exports.ensureSupabaseStorageRole = onCall({ region: 'us-central1' }, async request => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in before uploading images.');
+  const uid = request.auth.uid;
+  const user = await getAuth().getUser(uid);
+  if (user.customClaims?.role === 'authenticated') return { status: 'already_set' };
+  await getAuth().setCustomUserClaims(uid, {
+    ...(user.customClaims || {}),
+    role: 'authenticated',
+  });
+  return { status: 'updated' };
+});
+
+exports.ensureSupabaseBookingMediaAccess = onCall({
+  region: 'us-central1',
+  secrets: [SUPABASE_SECRET_KEY],
+}, async request => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in before uploading chat images.');
+  const bookingId = typeof request.data?.bookingId === 'string' ? request.data.bookingId.trim() : '';
+  if (!bookingId || bookingId.length > 128) throw new HttpsError('invalid-argument', 'A valid booking is required.');
+
+  const booking = await db.collection('bookings').doc(bookingId).get();
+  if (!booking.exists) throw new HttpsError('not-found', 'Booking not found.');
+  const customerUid = booking.get('customerUid');
+  const barberId = booking.get('barberId');
+  if (![customerUid, barberId].includes(request.auth.uid) || customerUid === barberId) {
+    throw new HttpsError('permission-denied', 'Only booking participants can upload chat images.');
+  }
+  await upsertBookingMediaMembers(bookingId, [customerUid, barberId]);
+  return { status: 'ready' };
+});
 
 exports.deliverNotificationPush = onDocumentCreated({
   document: 'notifications/{notificationId}',
@@ -48,7 +120,9 @@ exports.deliverNotificationPush = onDocumentCreated({
   }
 });
 
-exports.deleteOwnAccount = onCall({ region: 'us-central1', timeoutSeconds: 540, memory: '1GiB' }, async request => {
+exports.deleteOwnAccount = onCall({
+  region: 'us-central1', timeoutSeconds: 540, memory: '1GiB', secrets: [SUPABASE_SECRET_KEY],
+}, async request => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in before deleting your account.');
   const authTime = Number(request.auth.token.auth_time || 0);
   if (!authTime || Date.now() / 1000 - authTime > 10 * 60) {
@@ -84,6 +158,20 @@ exports.deleteOwnAccount = onCall({ region: 'us-central1', timeoutSeconds: 540, 
     .flatMap(snapshot => snapshot.docs);
   refs.set(`users/${uid}`, db.collection('users').doc(uid));
   refs.set(`barbers/${uid}`, db.collection('barbers').doc(uid));
+
+  // Remove Supabase media before deleting Firebase records so a failed storage
+  // cleanup leaves the account available for a safe retry.
+  await Promise.all([
+    deleteSupabaseStorageObjects('halaqi-media', [
+      `users/${uid}`, `barbers/${uid}`, `posts/${uid}`,
+    ]),
+    deleteSupabaseStorageObjects('halaqi-chat', bookingIds.map(bookingId => `chats/${bookingId}`)),
+  ]);
+  if (bookingIds.length) {
+    await supabaseAdminRequest(`/rest/v1/booking_media_members?booking_id=in.(${bookingIds.map(encodeURIComponent).join(',')})`, {
+      method: 'DELETE',
+    });
+  }
 
   const deletions = [...refs.values()];
   for (let i = 0; i < deletions.length; i += 20) {
