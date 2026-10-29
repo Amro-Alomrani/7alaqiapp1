@@ -73,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (async () => {
       try {
         const { onAuthChange } = await import('@/lib/firebase');
-        unsubscribe = await onAuthChange((fbUser: any) => {
+        unsubscribe = await onAuthChange(fbUser => {
           if (!mounted) return;
           setAuthReady(true);
 
@@ -85,13 +85,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
 
-          if (fbUser.email) {
-            const stored = loadFromStorage<BarberUser>('barberco_barber');
-            if (stored?.uid === fbUser.uid) {
-              setBarberUser(stored);
-            }
-          }
+          // Never expose cached data belonging to a different Firebase user.
+          const storedCustomer = loadFromStorage<CustomerUser>('barberco_customer');
+          const storedBarber = loadFromStorage<BarberUser>('barberco_barber');
+          setCustomer(storedCustomer?.uid === fbUser.uid ? storedCustomer : null);
+          setBarberUser(storedBarber?.uid === fbUser.uid ? storedBarber : null);
         });
+        if (!mounted) unsubscribe();
       } catch {
         if (mounted) setAuthReady(true);
       }
@@ -140,27 +140,18 @@ return;
     };
     setCustomer(user);
     localStorage.setItem('barberco_customer', JSON.stringify(user));
-    void import('@/lib/db').then(async ({ upsertUser, getUser }) => {
-      let savedAvatar: string | undefined;
+    void import('@/lib/db').then(async ({ getUser }) => {
       try {
         const existing = await getUser(uid);
-        if (existing?.avatar && existing.avatar !== '/logo.png') {
-          savedAvatar = existing.avatar;
+        if (existing) {
           setCustomer(prev => {
             if (!prev || prev.uid !== uid) return prev;
-            const updated = { ...prev, avatar: savedAvatar! };
+            const updated = { ...prev, name: existing.name || prev.name, phone: existing.phone || prev.phone, avatar: existing.avatar || prev.avatar };
             localStorage.setItem('barberco_customer', JSON.stringify(updated));
             return updated;
           });
         }
-      } catch {}
-
-      await upsertUser(uid, {
-        name: user.name,
-        phone: user.phone,
-        ...(savedAvatar ? {} : { avatar: defaultAvatar }),
-        role: 'customer',
-      }).catch(() => {});
+      } catch { /* Keep the signed-in profile while connectivity recovers. */ }
     }).catch(() => {});
   }, []);
 
@@ -179,17 +170,20 @@ return;
     const user: BarberUser = { uid, email: _email, name: name || 'Barber', shopName: shopName || 'Barbershop' };
     setBarberUser(user);
     localStorage.setItem('barberco_barber', JSON.stringify(user));
-    void import('@/lib/db').then(async ({ getBarber, updateBarberProfile }) => {
+    void import('@/lib/db').then(async ({ getBarber }) => {
       if (!name || !shopName) {
         getBarber(uid).then(doc => {
           if (doc) {
             const updated = { ...user, name: doc.name || user.name, shopName: doc.shopName || user.shopName };
-            setBarberUser(updated);
-            localStorage.setItem('barberco_barber', JSON.stringify(updated));
+            setBarberUser(current => {
+              if (current?.uid !== uid) return current;
+              localStorage.setItem('barberco_barber', JSON.stringify(updated));
+              return updated;
+            });
           }
         }).catch(() => {});
       }
-    });
+    }).catch(() => {});
   }, []);
 
   const logoutBarber = useCallback(() => {

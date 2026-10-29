@@ -29,7 +29,7 @@ export default function BarberLoginPage() {
       const user = await loginEmail(email.trim(), password);
       const { getUser, getBarber, createBarberProfile } = await import('@/lib/db');
 
-      const profile = await getUser(user.uid).catch(() => null);
+      const profile = await getUser(user.uid);
       if (profile?.role === 'customer') {
         const { signOutAll } = await import('@/lib/auth-providers');
         await signOutAll().catch(() => {});
@@ -39,7 +39,7 @@ export default function BarberLoginPage() {
         return;
       }
 
-      let barberDoc = await getBarber(user.uid).catch(() => null);
+      let barberDoc = await getBarber(user.uid);
       if (!barberDoc) {
         barberDoc = await createBarberProfile(user.uid, {
           name: user.name || email.split('@')[0],

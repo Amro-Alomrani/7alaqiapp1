@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { useAuth } from '@/contexts/AuthContext';
 import { subscribeNotifications, type NotificationDoc } from '@/lib/db';
+import { notificationRoute } from '@/lib/notificationRoute';
 
 /**
  * Mounted once at app root. Listens to the current user's notifications
@@ -23,10 +24,8 @@ export default function NotificationsListener() {
     let actionListener: { remove: () => Promise<void> } | undefined;
     void import('@capacitor/push-notifications').then(async ({ PushNotifications }) => {
       actionListener = await PushNotifications.addListener('pushNotificationActionPerformed', event => {
-        const data = event.notification.data as { bookingId?: string; postId?: string } | undefined;
-        if (data?.bookingId) navigate('/booking-status');
-        else if (data?.postId) navigate('/feed');
-        else navigate('/notifications');
+        const data = event.notification.data as { bookingId?: string; postId?: string; type?: string } | undefined;
+        navigate(notificationRoute(data, Boolean(barberUser?.uid)));
       });
       if (disposed) await actionListener.remove();
     }).catch(() => undefined);
@@ -34,7 +33,7 @@ export default function NotificationsListener() {
       disposed = true;
       void actionListener?.remove();
     };
-  }, [uid, navigate]);
+  }, [uid, barberUser?.uid, navigate]);
 
   useEffect(() => {
     if (!uid) return;

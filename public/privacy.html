@@ -17,7 +17,7 @@
 <body>
 <main>
   <h1>سياسة الخصوصية لتطبيق 7alaqi</h1>
-  <p>آخر تحديث: 28 أكتوبر 2026</p>
+  <p>آخر تحديث: 29 أكتوبر 2026</p>
   <p>تشرح هذه السياسة بيانات تطبيق 7alaqi، وكيف تُستخدم وتُشارك، وكيفية طلب حذف الحساب. تنطبق على تطبيق الهاتف ونسخة الويب.</p>
 
   <h2>البيانات التي يتعامل معها التطبيق</h2>
@@ -36,8 +36,8 @@
 
   <h2>الخدمات التي تستقبل البيانات</h2>
   <ul>
-    <li>تستخدم 7alaqi Firebase من Google للمصادقة وبيانات التطبيق ووظائف الخادم والإشعارات، وتستخدم Supabase لتخزين الصور والملفات المرتبطة بالحسابات والصالونات والمنشورات ومحادثات الحجوزات.</li>
-    <li>تتلقى خدمة الصور في Supabase إثبات تسجيل الدخول من Firebase للتحقق من صلاحية الوصول للصور، دون إرسال كلمة مرور الحساب إليها.</li>
+    <li>تستخدم 7alaqi Firebase من Google للمصادقة وقاعدة البيانات والإشعارات، وSupabase للصور ووظائف الخادم الخاصة بالصور وحذف الحساب وإرسال طلبات الإشعارات إلى Firebase Cloud Messaging. قد تبقى صور قديمة في Firebase Storage حتى حذفها.</li>
+    <li>تتلقى وظائف Supabase إثبات تسجيل الدخول من Firebase للتحقق من الهوية والصلاحيات وتقرأ بيانات الحساب والحجوزات اللازمة للخدمة، وتحذف البيانات عند تأكيد طلب الحذف. لا ترسل كلمة مرور الحساب إلى Supabase. تتعامل وظيفة الإشعارات مع رمز الجهاز ومحتوى الإشعار لإرساله عبر Google.</li>
     <li>تعرض الخرائط بيانات OpenStreetMap، ويتلقى مزود الخرائط منطقة الخريطة وعنوان الشبكة. عند طلب عنوان من الإحداثيات أو مسار، قد تُرسل الإحداثيات وعنوان الشبكة إلى خدمتي Nominatim وOSRM العامتين. وعند اختيار الاتجاهات، تُرسل إحداثيات المسار إلى خرائط Google.</li>
     <li>لا يرسل التطبيق المحادثات أو الصور إلى خدمة ذكاء اصطناعي في النسخة الحالية. ولا يستخدم ملف التطبيق SDK إعلانات.</li>
   </ul>
@@ -46,7 +46,8 @@
   <p>يطلب التطبيق إذن الموقع فقط عند استخدام ميزة تعتمد عليه، ويمكن رفض الإذن أو استخدام إدخال يدوي حيث يتاح. لا يطلب التطبيق تتبع الموقع في الخلفية. الصور المنشورة لملف الحلاق أو الخدمات أو المنشورات يمكن أن تكون عامة؛ أما صور محادثات الحجز فتُستخدم ضمن المحادثة المرتبطة بالحجز.</p>
 
   <h2>الحماية والاحتفاظ</h2>
-  <p>تُنقل اتصالات التطبيق إلى الخدمات عبر HTTPS. تُحفظ بيانات الحساب أثناء استخدامه، ثم تُحذف البيانات المرتبطة به عند إكمال طلب حذف الحساب، باستثناء ما يلزم الاحتفاظ به بموجب القانون أو لمعالجة نزاع أو منع إساءة الاستخدام. لا تُطلب بيانات دفع بالبطاقات في النسخة الحالية؛ يعرض التطبيق الدفع النقدي فقط.</p>
+  <p>تُنقل اتصالات التطبيق إلى الخدمات عبر HTTPS. تحفظ بيانات الحساب والحجوزات والمحتوى أثناء استخدام الحساب. عند اكتمال الحذف تزال بياناته النشطة وصوره من Firebase وSupabase. يستمر تنفيذ الطلب على الخادم إذا أغلقت التطبيق؛ وعند تعذر إكماله يمكنك متابعة الحالة أو التواصل مع الدعم.</p>
+  <p>بعد اكتمال الحذف يبقى معرّف أمني للحساب لمدة تصل إلى ساعتين لمنع جلسة قديمة من إعادة البيانات، وسجل حالة مختصر دون ملف الحساب لمدة تصل إلى 24 ساعة، ثم تزال في دورة التنظيف التالية. قد تبقى معرّفات عشوائية لموارد محذوفة لمنع إعادة إنشائها دون اسم أو محتوى أو معرّف حساب. تخضع سجلات الأمان والتشغيل لدى مزودي الاستضافة لسياسات الاحتفاظ لديهم. لا يجمع التطبيق بيانات البطاقات أو الحسابات البنكية؛ يسجل الخدمات المحجوزة وأسعارها وحالتها ويعرض الدفع النقدي.</p>
 
   <h2>حذف الحساب والبيانات</h2>
   <p>يمكنك بدء الحذف من صفحة الحساب داخل التطبيق أو من <a href="/delete-account.html">صفحة حذف حساب 7alaqi على الويب</a>. سجّل الدخول بالحساب المطلوب حذفه ثم أكد الطلب. قد يُطلب منك تسجيل الدخول مجددًا للتحقق من ملكية الحساب. يزيل الحذف الحساب وملف المستخدم أو الصالون والبيانات والمحتوى المرتبط به والملفات المرفوعة وفق آلية الحذف. لا يمكن استرجاع الحساب بعد اكتمال الحذف.</p>
@@ -56,7 +57,7 @@
 
   <section class="lang" lang="en" aria-label="English privacy policy">
     <h1>7alaqi Privacy Policy</h1>
-    <p>Last updated: 28 October 2026. This policy covers the 7alaqi mobile app and web app.</p>
+    <p>Last updated: 29 October 2026. This policy covers the 7alaqi mobile app and web app.</p>
     <h2>Information handled by the app</h2>
     <ul>
       <li>Account details you provide, such as name, email address, phone number, and account type.</li>
@@ -70,15 +71,16 @@
     <p>Information is used to create and secure accounts, show barber profiles and listed services and prices, send and track booking requests, enable related messages, notifications and reviews, use location features you request, and process account-deletion requests. Barber profiles, posts, and photos their owners publish may be visible to app users. Booking location is shared only with parties needed to provide that service, according to the feature.</p>
     <h2>Service providers and sharing</h2>
     <ul>
-      <li>7alaqi uses Google Firebase for authentication, app data, backend functions, and notifications, and Supabase for images and files associated with accounts, salons, posts, and booking chats.</li>
-      <li>The Supabase image service receives Firebase proof of sign-in to verify image access. Account passwords are not sent to Supabase.</li>
+      <li>7alaqi uses Google Firebase for authentication, app data, and push delivery. Supabase hosts images and server functions for image access, account deletion, and submitting notifications to Firebase Cloud Messaging. Legacy images may remain in Firebase Storage until deleted.</li>
+      <li>Supabase functions receive Firebase proof of sign-in to verify identity and access, process account and booking data needed for the service, and remove data after a confirmed deletion request. Account passwords are not sent to Supabase. The notification function processes device tokens and notification content for delivery through Google.</li>
       <li>Maps use OpenStreetMap data, whose tile provider receives the map area and network address. When you request reverse geocoding or a route, coordinates and network address may be sent to the public Nominatim and OSRM services. When you tap directions, route coordinates are sent to Google Maps.</li>
       <li>The current app does not send chats or images to an AI service and does not include an advertising SDK.</li>
     </ul>
     <h2>Location and photos</h2>
     <p>Location permission is requested only when using a feature that needs it. You can deny permission and use manual entry where available. The app does not request background location tracking. Photos published for barber profiles, services, or posts may be public. Booking-chat photos are used within the related booking conversation.</p>
     <h2>Security and retention</h2>
-    <p>App connections to services use HTTPS. Account information is kept while the account is active. When a deletion request is completed, associated data is deleted except information that must be retained by law or to resolve a dispute or prevent abuse. The current app does not request card-payment data and lists cash payment only.</p>
+    <p>App connections to services use HTTPS. Account records, bookings, and content are kept while the account is active. Completed deletion removes active account data and images from Firebase and Supabase. Processing continues if you close the app; check its status or contact support if it cannot complete.</p>
+    <p>After completion, a security account marker is retained for up to two hours to prevent stale sessions from recreating data; a minimal status record without the account profile is retained for up to 24 hours. These records are removed on the next cleanup cycle. Random identifiers of deleted resources may remain blocked without names, content, or account identifiers. Hosting-provider operational and security logs follow their retention policies. The app does not collect card or bank-account details; it records booked services, prices, and statuses and offers cash payment.</p>
     <h2>Account and data deletion</h2>
     <p>Start deletion from the in-app account page or the <a href="/delete-account.html">7alaqi account deletion web page</a>. Sign in to the account you want deleted and confirm the request. You may be asked to sign in again to verify ownership. Deletion removes the account, user or salon profile, associated data and content, and uploaded files through the deletion process. The account cannot be recovered after deletion completes.</p>
     <h2>Privacy contact</h2>

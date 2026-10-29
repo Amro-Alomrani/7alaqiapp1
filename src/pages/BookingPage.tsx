@@ -9,6 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { createBooking as createFirestoreBooking } from '@/lib/db';
 import { Service } from '@/types';
 import { Button } from '@/components/ui/button';
+import { loyaltyEnabled } from '@/lib/features';
 import { useLiveBooking } from '@/contexts/LiveBookingContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 
@@ -138,6 +139,8 @@ export default function BookingPage() {
             date: dates[selectedDay].key,
             time: selectedTime,
             totalPrice: selectedService.price + tip,
+            tip,
+            payMethod,
             pointsEarned: 0,
           });
 
@@ -329,10 +332,10 @@ export default function BookingPage() {
                   <span className="font-bold text-foreground">{t.booking.total}</span>
                   <span className="font-black text-xl text-primary">{(selectedService?.price || 0) + tip} JOD</span>
                 </div>
-                <div className="flex items-center gap-2 mt-2">
+                {loyaltyEnabled && <div className="flex items-center gap-2 mt-2">
                   <span className="text-base">🎁</span>
                   <p className="text-xs text-foreground">{t.booking.earnPoints} <span className="text-primary font-bold">{Math.floor((selectedService?.price || 0) * 2)}</span> {t.booking.earnPointsSuffix}</p>
-                </div>
+                </div>}
               </div>
             </motion.div>
           )}

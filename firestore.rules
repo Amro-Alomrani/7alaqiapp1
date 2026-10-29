@@ -19,6 +19,14 @@ service cloud.firestore {
         && (booking.customerUid == request.auth.uid || booking.barberId == request.auth.uid);
     }
 
+    function bookingParticipantAfter(bookingId) {
+      let booking = getAfter(/databases/$(database)/documents/bookings/$(bookingId)).data;
+      return signedIn()
+        && !exists(/databases/$(database)/documents/accountDeletionBookingLocks/$(bookingId))
+        && notDeleting(booking.customerUid) && notDeleting(booking.barberId)
+        && request.auth.uid in [booking.customerUid, booking.barberId];
+    }
+
     match /barbers/{barberId} {
       allow read: if true;
       allow create: if signedIn() && request.auth.uid == barberId
@@ -160,29 +168,34 @@ service cloud.firestore {
         && notDeleting(request.resource.data.toUid)
         && request.resource.data.title is string && request.resource.data.title.size() <= 120
         && request.resource.data.body is string && request.resource.data.body.size() <= 500
+        && request.resource.data.keys().hasOnly([
+          'toUid', 'fromUid', 'type', 'title', 'body', 'fromName', 'fromAvatar', 'bookingId', 'postId',
+          'read', 'createdAt', 'pushPending', 'nextAttemptAt', 'pushAttempts'
+        ])
+        && request.resource.data.get('pushPending', true) == true
+        && request.resource.data.get('nextAttemptAt', 0) == 0
+        && request.resource.data.get('pushAttempts', 0) == 0
         && ((request.resource.data.type == 'booking_request'
-            && bookingParticipant(request.resource.data.bookingId)
-            && exists(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId))
-            && get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid == request.auth.uid
-            && get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId == request.resource.data.toUid)
+            && bookingParticipantAfter(request.resource.data.bookingId)
+            && getAfter(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid == request.auth.uid
+            && getAfter(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId == request.resource.data.toUid)
           || (request.resource.data.type == 'booking_update'
-            && bookingParticipant(request.resource.data.bookingId)
-            && exists(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId))
+            && bookingParticipantAfter(request.resource.data.bookingId)
             && request.resource.data.toUid != request.auth.uid
             && request.resource.data.toUid in [
-              get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid,
-              get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId
+              getAfter(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid,
+              getAfter(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId
             ]
             && request.auth.uid in [
-              get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid,
-              get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId
+              getAfter(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid,
+              getAfter(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId
             ])
           || (request.resource.data.type == 'message'
-            && bookingParticipant(request.resource.data.bookingId)
+            && bookingParticipantAfter(request.resource.data.bookingId)
             && request.resource.data.toUid != request.auth.uid
             && request.resource.data.toUid in [
-              get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid,
-              get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId
+              getAfter(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.customerUid,
+              getAfter(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.barberId
             ])
           || (request.resource.data.type == 'new_post'
             && !exists(/databases/$(database)/documents/accountDeletionPostLocks/$(request.resource.data.postId))

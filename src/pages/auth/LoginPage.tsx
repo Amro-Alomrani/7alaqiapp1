@@ -31,18 +31,18 @@ export default function LoginPage() {
     try {
       const user = await loginEmail(email.trim(), password);
       const { getUser } = await import('@/lib/db');
-      const profile = await getUser(user.uid).catch(() => null);
+      const profile = await getUser(user.uid);
       const role = profile?.role;
       const requestedDestination = (location.state as { from?: unknown } | null)?.from;
       const returnToDeletion = requestedDestination === '/delete-account';
       if (role === 'barber') {
         const { getBarber } = await import('@/lib/db');
-        const barberDoc = await getBarber(user.uid).catch(() => null);
+        const barberDoc = await getBarber(user.uid);
         loginBarber(user.email || email.trim(), user.uid, barberDoc?.name || user.name, barberDoc?.shopName);
         toast.success(ar ? `أهلاً ${user.name || ''} ✂️` : `Welcome, ${user.name || ''} ✂️`);
         navigate(returnToDeletion ? '/delete-account' : '/barber');
       } else {
-        loginCustomer(user.phone || '', user.name, user.uid);
+        loginCustomer(profile?.phone || user.phone || '', profile?.name || user.name, user.uid);
         toast.success(ar ? `أهلاً ${user.name || ''} 👋` : `Welcome, ${user.name || ''} 👋`);
         navigate(returnToDeletion ? '/delete-account' : '/');
       }

@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getFirebaseAuthLazy } from './firebase';
+import { transferImage } from './mediaTransport';
 
 const projectUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
@@ -61,34 +62,12 @@ export async function uploadMediaImage(path: string, image: Blob, onProgress?: (
   const auth = await getFirebaseAuthLazy();
   if (!auth.currentUser) throw Object.assign(new Error('Sign in to upload images.'), { code: 'storage/unauthenticated' });
   const token = await auth.currentUser.getIdToken();
-  return new Promise((resolve, reject) => {
-    const request = new XMLHttpRequest();
-    request.open('POST', `${projectUrl}/functions/v1/media?upload=1&path=${encodeURIComponent(path)}`);
-    request.timeout = 90_000;
-    request.setRequestHeader('apikey', publishableKey!);
-    request.setRequestHeader('Authorization', `Bearer ${token}`);
-    request.setRequestHeader('Content-Type', image.type || 'image/jpeg');
-    request.upload.onprogress = event => {
-      if (event.lengthComputable) onProgress?.(Math.min(95, Math.round(event.loaded / event.total * 95)));
-    };
-    request.onload = () => {
-      let payload;
-      try { payload = JSON.parse(request.responseText); }
-      catch { reject(new Error('Image storage returned an invalid response.')); return; }
-      if (request.status < 200 || request.status >= 300) {
-        reject(Object.assign(new Error(payload?.error?.message || 'Image upload failed.'), { code: payload?.error?.code, statusCode: String(request.status) }));
-        return;
-      }
-      if (typeof payload.path !== 'string' || typeof payload.url !== 'string') { reject(new Error('Invalid uploaded image reference.')); return; }
-      onProgress?.(100);
-      resolve(payload);
-    };
-    const interrupted = () => reject(Object.assign(new Error('Image upload was interrupted.'), { code: 'storage/retry-limit-exceeded' }));
-    request.onerror = interrupted;
-    request.ontimeout = interrupted;
-    request.onabort = interrupted;
-    request.send(image);
-  });
+  onProgress?.(0);
+  const result = await transferImage(`${projectUrl}/functions/v1/media?upload=1&path=${encodeURIComponent(path)}`, {
+    apikey: publishableKey!, Authorization: `Bearer ${token}`, 'Content-Type': image.type || 'image/jpeg',
+  }, image);
+  onProgress?.(100);
+  return result;
 }
 
 export function getPrivateMediaUrl(bucket: string, path: string) {

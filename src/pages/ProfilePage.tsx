@@ -11,6 +11,7 @@ import { favPrefs, notifPrefs } from '@/lib/userPrefs';
 import { toast } from 'sonner';
 import { getUser, upsertUser } from '@/lib/db';
 import { describeImageUploadError, uploadImage } from '@/lib/storage';
+import { loyaltyEnabled } from '@/lib/features';
 
 type Tab = 'profile' | 'styles' | 'history';
 
@@ -73,8 +74,8 @@ export default function ProfilePage() {
     setAvatarUploading(true);
     try {
       const url = await uploadImage(file, `users/${customer.uid}/avatar-${Date.now()}.jpg`);
-      updateCustomerAvatar(url);
       await upsertUser(customer.uid, { avatar: url });
+      updateCustomerAvatar(url);
       toast.success(ar ? 'تم تحديث الصورة ✅' : 'Photo updated ✅');
     } catch (error) {
       toast.error(ar ? 'فشل رفع الصورة' : 'Upload failed', { description: describeImageUploadError(error, ar) });
@@ -107,7 +108,7 @@ export default function ProfilePage() {
             >
               <span className="absolute inset-0 flex items-center justify-center text-2xl font-black text-primary">{userName.trim().charAt(0).toUpperCase() || '؟'}</span>
               {userAvatar && <img src={userAvatar} alt={userName} onError={event => { event.currentTarget.style.display = 'none'; }} className="absolute inset-0 w-full h-full object-cover" />}
-              <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+              <div className={`absolute inset-0 bg-black/40 flex items-center justify-center transition ${avatarUploading ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                 {avatarUploading ? <Loader2 size={18} className="text-white animate-spin" /> : <Camera size={18} className="text-white" />}
               </div>
             </button>
@@ -147,7 +148,7 @@ export default function ProfilePage() {
       <div className="px-5 mb-5">
         <div className="flex gap-1 bg-secondary rounded-xl p-1">
           {([
-            { id: 'profile', label: t.profile.tabLoyalty, icon: Gift },
+            { id: 'profile', label: loyaltyEnabled ? t.profile.tabLoyalty : (ar ? 'الحساب' : 'Account'), icon: Gift },
             { id: 'styles', label: t.profile.tabDna, icon: Brain },
             { id: 'history', label: t.profile.tabHistory, icon: Calendar },
           ] as const).map(({ id, label, icon: Icon }) => (
@@ -175,7 +176,7 @@ export default function ProfilePage() {
               <div className="absolute -end-6 -top-6 w-24 h-24 rounded-full bg-white/10" />
             </div>
 
-            <div className="bg-card border border-border rounded-2xl p-5 mt-4">
+            {loyaltyEnabled && <div className="bg-card border border-border rounded-2xl p-5 mt-4">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-2xl">🎁</span>
                 <div>
@@ -201,7 +202,7 @@ export default function ProfilePage() {
                   </div>
                 ))}
               </div>
-            </div>
+            </div>}
           </div>
         )}
 
@@ -234,7 +235,7 @@ export default function ProfilePage() {
         <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border">
           {[
             { icon: MessageSquare, label: ar ? 'محادثات الحجوزات' : 'Booking Chats', badge: undefined, path: '/messages' },
-            { icon: QrCode, label: ar ? 'مسح QR واكسب نقاط' : 'QR Check-In', badge: undefined, path: '/qr-scan' },
+            ...(loyaltyEnabled ? [{ icon: QrCode, label: ar ? 'مسح QR واكسب نقاط' : 'QR Check-In', badge: undefined, path: '/qr-scan' }] : []),
             { icon: Heart, label: t.profile.favoriteBarbers, badge: favCount > 0 ? String(favCount) : undefined, path: '/favorites' },
             { icon: Bell, label: t.profile.notifications, badge: unreadNotifs > 0 ? String(unreadNotifs) : undefined, path: '/notifications' },
             { icon: Users, label: t.profile.following, badge: undefined, path: '/feed' },
@@ -251,6 +252,9 @@ export default function ProfilePage() {
       </div>
 
       <div className="px-5 mt-5 mb-4">
+        <button onClick={() => navigate('/privacy')} className="mb-4 w-full py-2 text-sm text-primary">
+          {ar ? 'سياسة الخصوصية' : 'Privacy policy'}
+        </button>
         <Button variant="outline" onClick={() => { logoutCustomer(); navigate('/login'); }}
           className="w-full h-12 rounded-2xl text-destructive border-destructive/20 gap-2">
           <LogOut size={16} />{t.profile.signOut}

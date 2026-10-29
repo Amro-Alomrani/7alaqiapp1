@@ -23,29 +23,47 @@ export function createBackendHandler(options: {
   async function dispatchPushes(limit = 10) {
     const pending = await options.admin.due('notifications', 'pushPending', Date.now(), limit);
     let delivered = 0;
+    const deadline = Date.now() + 20_000;
     for (const item of pending) {
+      if (Date.now() >= deadline) break;
       const current = await options.admin.get(item.path);
       if (!current?.data.pushPending || current.data.leaseUntil > Date.now()) continue;
-      const leaseUntil = Date.now() + 60_000;
+      const leaseUntil = Date.now() + 90_000;
+      const leaseId = crypto.randomUUID();
       try {
-        await options.admin.set(item.path, { leaseUntil }, { fields: ['leaseUntil'], updateTime: current.updateTime });
-        const recipient = await options.admin.get(`users/${item.data.toUid}`) || await options.admin.get(`barbers/${item.data.toUid}`);
-        const token = typeof recipient?.data.fcmToken === 'string' ? recipient.data.fcmToken.trim() : '';
+        await options.admin.set(item.path, { leaseUntil, leaseId }, { fields: ['leaseUntil', 'leaseId'], updateTime: current.updateTime });
+      } catch (error) {
+        if (error instanceof BackendError && error.code === 'aborted') continue;
+        throw error;
+      }
+      const save = async (patch: Record<string, unknown>) => {
+        const latest = await options.admin.get(item.path);
+        if (!latest || latest.data.leaseId !== leaseId) return;
+        await options.admin.set(item.path, { ...patch, leaseId: '' }, { fields: [...Object.keys(patch), 'leaseId'], updateTime: latest.updateTime });
+      };
+      try {
+        if (await options.admin.get(`accountDeletionLocks/${item.data.toUid}`)) {
+          await save({ pushPending: false, pushStatus: 'account_removed', leaseUntil: 0 });
+          continue;
+        }
+        const [user, barber] = await Promise.all([options.admin.get(`users/${item.data.toUid}`), options.admin.get(`barbers/${item.data.toUid}`)]);
+        const token = [barber?.data.fcmToken, user?.data.fcmToken].find(value => typeof value === 'string' && value.trim())?.trim() || '';
         if (!token) {
-          await options.admin.set(item.path, { pushPending: false, pushStatus: 'no_device', leaseUntil: 0 }, { fields: ['pushPending', 'pushStatus', 'leaseUntil'] });
+          await save({ pushPending: false, pushStatus: 'no_device', leaseUntil: 0 });
           continue;
         }
         const data: Record<string, string> = { notificationId: item.path.split('/').at(-1) || '', type: String(item.data.type || '') };
         for (const key of ['bookingId', 'postId']) if (typeof item.data[key] === 'string') data[key] = item.data[key];
-        await options.admin.sendPush({ token, notification: { title: item.data.title, body: item.data.body }, data, android: { priority: 'high' }, apns: { payload: { aps: { sound: 'default' } } } });
-        await options.admin.set(item.path, { pushPending: false, pushStatus: 'accepted', pushedAt: Date.now(), leaseUntil: 0 }, { fields: ['pushPending', 'pushStatus', 'pushedAt', 'leaseUntil'] });
+        await options.admin.sendPush({ token, notification: { title: item.data.title, body: item.data.body }, data, android: { priority: 'high', notification: { tag: data.notificationId } }, apns: { headers: { 'apns-collapse-id': data.notificationId }, payload: { aps: { sound: 'default' } } } });
+        await save({ pushPending: false, pushStatus: 'accepted', pushedAt: Date.now(), leaseUntil: 0 });
         delivered++;
       } catch (error) {
         const attempts = Number(item.data.pushAttempts || 0) + 1;
-        await options.admin.set(item.path, { pushAttempts: attempts, nextAttemptAt: Date.now() + Math.min(3600_000, 5000 * 2 ** Math.min(attempts, 6)), leaseUntil: 0, pushStatus: 'retrying' }, { fields: ['pushAttempts', 'nextAttemptAt', 'leaseUntil', 'pushStatus'] }).catch(() => {});
-        if (error instanceof BackendError && error.fcmCode === 'UNREGISTERED') {
-          await options.admin.set(item.path, { pushPending: false, pushStatus: 'invalid_device', leaseUntil: 0 }, { fields: ['pushPending', 'pushStatus', 'leaseUntil'] }).catch(() => {});
-        }
+        const invalid = error instanceof BackendError && error.fcmCode === 'UNREGISTERED';
+        await save({ pushAttempts: attempts, pushPending: !invalid && attempts < 8,
+          nextAttemptAt: Date.now() + Math.min(3600_000, 5000 * 2 ** Math.min(attempts, 6)), leaseUntil: 0,
+          pushStatus: invalid ? 'invalid_device' : attempts >= 8 ? 'failed' : 'retrying',
+        }).catch(() => {});
       }
     }
     return { checked: pending.length, accepted: delivered };
@@ -68,7 +86,8 @@ export function createBackendHandler(options: {
           await options.admin.get('_backendHealth/nonexistent');
           return json({ configured: true, firestoreAccess: true });
         }
-        return json({ deletion: await deletion.runPending(), pushes: await dispatchPushes() });
+        const pushes = await dispatchPushes();
+        return json({ pushes, deletion: await deletion.runPending() });
       }
       if (body.action === 'confirm-account-deletion') {
         const result = await deletion.confirm(body.jobId, body.jobToken);

@@ -29,6 +29,7 @@ export default function BookingStatusPage() {
   const ar = language === 'ar';
   const [rating, setRating] = useState(0);
   const [cancelling, setCancelling] = useState(false);
+  const [ratingBusy, setRatingBusy] = useState(false);
 
   const booking = activeBooking || bookingHistory[0];
 
@@ -339,7 +340,15 @@ export default function BookingStatusPage() {
               <motion.button
                 initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
-                onClick={() => { rateBooking(booking.id, rating); navigate('/'); }}
+                disabled={ratingBusy}
+                onClick={async () => {
+                  if (ratingBusy) return;
+                  setRatingBusy(true);
+                  try {
+                    if (await rateBooking(booking.id, rating)) navigate('/');
+                    else toast.error(ar ? 'تعذر حفظ التقييم. حاول مجددًا.' : 'Could not save the rating. Try again.');
+                  } finally { setRatingBusy(false); }
+                }}
                 className="bg-primary text-primary-foreground font-bold px-6 py-2.5 rounded-2xl text-sm"
               >
                 {ar ? 'إرسال التقييم' : 'Submit Rating'}

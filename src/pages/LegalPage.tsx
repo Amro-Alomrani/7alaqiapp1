@@ -1,14 +1,16 @@
 import { useNavigate } from 'react-router-dom';
+import { useSafeBack } from '@/hooks/useSafeBack';
 
 export default function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
   const navigate = useNavigate();
+  const safeBack = useSafeBack();
   const privacy = kind === 'privacy';
 
   if (privacy) {
     return (
       <main className="min-h-screen bg-background px-4 py-6 text-foreground">
         <div className="mx-auto max-w-3xl">
-          <button onClick={() => navigate('/intro')} className="mb-4 text-sm font-bold text-primary">
+          <button onClick={() => safeBack()} className="mb-4 text-sm font-bold text-primary">
             العودة إلى 7alaqi
           </button>
           <iframe

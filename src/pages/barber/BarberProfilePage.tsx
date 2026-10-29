@@ -7,6 +7,9 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useBarber, usePosts } from '@/contexts/DataContext';
+import { useFollowerCount } from '@/hooks/useFollowerCount';
+import { useReviewStats } from '@/hooks/useReviewStats';
+import { loyaltyEnabled } from '@/lib/features';
 import {
   updateBarberProfile,
   createPost,
@@ -28,6 +31,8 @@ export default function BarberProfilePage() {
   const ar = language === 'ar';
   const uid = barberUser?.uid || '';
   const barber = useBarber(uid);
+  const followerCount = useFollowerCount(uid);
+  const reviewStats = useReviewStats(uid);
   const allPosts = usePosts();
   const myPosts = useMemo(() => allPosts.filter((p: any) => p.ownerUid === uid), [allPosts, uid]);
 
@@ -321,9 +326,9 @@ export default function BarberProfilePage() {
 
         <div className="grid grid-cols-3 gap-2 mb-5">
           {[
-            { label: ar ? 'التقييم' : 'Rating', value: barber?.rating?.toFixed(1) || '0.0', icon: Star },
-            { label: ar ? 'متابعون' : 'Followers', value: (barber?.followers || 0).toLocaleString(), icon: Users },
-            { label: ar ? 'الثقة' : 'Trust', value: (barber as any)?.trustScore || 0, icon: TrendingUp },
+            { label: ar ? 'التقييم' : 'Rating', value: reviewStats.rating.toFixed(1), icon: Star },
+            { label: ar ? 'متابعون' : 'Followers', value: followerCount === null ? '—' : followerCount.toLocaleString(), icon: Users },
+            { label: ar ? 'التقييمات' : 'Reviews', value: reviewStats.count, icon: TrendingUp },
           ].map(({ label, value, icon: Icon }) => (
             <div key={label} className="bg-card border border-border rounded-2xl p-3 text-center">
               <Icon size={14} className="text-primary mx-auto mb-1" />
@@ -421,7 +426,7 @@ export default function BarberProfilePage() {
 
         <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border mb-5">
           {[
-            { label: ar ? 'رمز QR الخاص بالصالون' : 'Shop QR Code', icon: QrCodeIcon, path: '/barber/qr' },
+            ...(loyaltyEnabled ? [{ label: ar ? 'رمز QR الخاص بالصالون' : 'Shop QR Code', icon: QrCodeIcon, path: '/barber/qr' }] : []),
             { label: ar ? 'إعدادات الأعمال' : 'Business Settings', icon: Scissors, path: '/barber/services' },
             { label: ar ? 'طاقم العمل' : 'Staff Management', icon: Users, path: '/barber/staff' },
             { label: ar ? 'الأرباح والمدفوعات' : 'Payout & Earnings', icon: TrendingUp, path: '/barber/earnings' },
@@ -517,6 +522,9 @@ export default function BarberProfilePage() {
           </motion.div>
         )}
       </AnimatePresence>
+      <button onClick={() => navigate('/privacy')} className="mx-5 mt-4 w-[calc(100%-2.5rem)] py-2 text-sm text-primary">
+        {ar ? 'سياسة الخصوصية' : 'Privacy policy'}
+      </button>
       <button onClick={() => navigate('/delete-account')} className="mx-5 mt-4 flex w-[calc(100%-2.5rem)] items-center justify-center gap-2 py-3 text-xs font-semibold text-destructive/80">
         <Trash2 size={14} />{ar ? 'طلب حذف الحساب والبيانات' : 'Request account and data deletion'}
       </button>

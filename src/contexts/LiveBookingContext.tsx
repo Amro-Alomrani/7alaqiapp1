@@ -10,9 +10,9 @@ interface LiveBookingContextType {
   activeBooking: LiveBooking | null;
   bookingHistory: LiveBooking[];
   allBookings: LiveBooking[];
-  createBooking: (barberId: string, salonId: string, service: Service, date: string, time: string, tip?: number, payMethod?: 'cash' | 'wallet', customerLocation?: { lat: number; lng: number }, presetId?: string, homeServiceFee?: number, homeService?: boolean) => LiveBooking;
+  createBooking: (barberId: string, salonId: string, service: Service, date: string, time: string, tip?: number, payMethod?: 'cash', customerLocation?: { lat: number; lng: number }, presetId?: string, homeServiceFee?: number, homeService?: boolean) => LiveBooking;
   cancelBooking: (id: string) => Promise<boolean>;
-  rateBooking: (id: string, rating: number, review?: string) => void;
+  rateBooking: (id: string, rating: number, review?: string) => Promise<boolean>;
   getActiveBooking: () => LiveBooking | null;
   acceptBooking: (id: string) => Promise<boolean>;
   rejectBooking: (id: string) => Promise<boolean>;
@@ -202,7 +202,7 @@ export function LiveBookingProvider({ children }: { children: ReactNode }) {
     date: string,
     time: string,
     tip = 0,
-    payMethod: 'cash' | 'wallet' = 'cash',
+    payMethod: 'cash' = 'cash',
     customerLocation?: { lat: number; lng: number },
     presetId?: string,
     homeServiceFee = 0,
@@ -334,9 +334,18 @@ export function LiveBookingProvider({ children }: { children: ReactNode }) {
     return true;
   }, [runStatusTransition]);
 
-  const rateBooking = useCallback((id: string, rating: number, review?: string) => {
-    setBookings(prev => prev.map(b => b.id === id ? { ...b, rating, review } : b));
-  }, []);
+  const rateBooking = useCallback(async (id: string, rating: number, review = '') => {
+    const booking = bookingsRef.current.find(item => item.id === id);
+    if (!booking || booking.status !== 'completed' || !customer?.uid || booking.customerId !== customer.uid) return false;
+    try {
+      const { addReview } = await import('@/lib/db');
+      await addReview(booking.barberId, customer.uid, id, {
+        customerName: customer.name, customerAvatar: customer.avatar, rating, comment: review,
+      });
+      setBookings(prev => prev.map(b => b.id === id ? { ...b, rating, review } : b));
+      return true;
+    } catch { return false; }
+  }, [customer]);
 
   const acceptBooking = useCallback(async (id: string) => {
     const changed = await runStatusTransition(id, ['requested'], 'accepted', 'confirmed');

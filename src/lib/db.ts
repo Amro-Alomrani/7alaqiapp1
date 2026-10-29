@@ -1,5 +1,6 @@
 ﻿import type { Barber, Post, Service, Booking, Review } from '@/types';
 import { getFirestoreLazy } from './firebase';
+import { definedFields } from './definedFields';
 
 async function fs() {
   const db = await getFirestoreLazy();
@@ -50,7 +51,7 @@ export async function createBarberProfile(uid: string, data: Partial<BarberDoc>)
     featured: false,
     address: data.address || '',
     description: data.description || '',
-    trustScore: 80,
+    trustScore: 0,
     avgDuration: 30,
     liveStatus: 'closed',
     followers: 0,
@@ -77,6 +78,30 @@ export async function getBarber(id: string): Promise<Barber | null> {
   const { db, doc, getDoc } = await fs();
   const snap = await getDoc(doc(db, COL.barbers, id));
   return snap.exists() ? ({ id: snap.id, ...snap.data() } as Barber) : null;
+}
+
+export function subscribeBarberProfile(id: string, cb: (barber: Barber | null) => void) {
+  let active = true;
+  let unsubscribe: (() => void) | undefined;
+  void fs().then(({ db, doc, onSnapshot }) => {
+    if (!active) return;
+    unsubscribe = onSnapshot(doc(db, COL.barbers, id), snapshot => {
+      if (active) cb(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } as Barber : null);
+    }, () => { /* Keep the last confirmed profile during reconnection. */ });
+  }).catch(() => { if (active) cb(null); });
+  return () => { active = false; unsubscribe?.(); };
+}
+
+export function subscribeFollowerCount(barberId: string, cb: (count: number) => void) {
+  let active = true;
+  let unsubscribe: (() => void) | undefined;
+  void fs().then(({ db, collection, query, where, onSnapshot }) => {
+    if (!active) return;
+    unsubscribe = onSnapshot(query(collection(db, COL.follows), where('barberId', '==', barberId)), snapshot => {
+      if (active) cb(snapshot.size);
+    }, () => { /* Keep the last server count while reconnecting. */ });
+  }).catch(() => {});
+  return () => { active = false; unsubscribe?.(); };
 }
 
 export async function listBarbers(): Promise<Barber[]> {
@@ -225,21 +250,17 @@ export interface BookingDoc {
 }
 
 export async function createBooking(
-  data: Omit<BookingDoc, 'createdAt' | 'updatedAt' | 'status'> & { status?: BookingDoc['status'] },
+  data: Omit<BookingDoc, 'createdAt' | 'updatedAt' | 'status' | 'payMethod' | 'tip'> & { status?: BookingDoc['status']; payMethod: 'cash'; tip: number },
   bookingId?: string,
 ): Promise<string> {
-  const { db, collection, addDoc, doc: fsDoc, setDoc } = await fs();
+  const { db, collection, doc: fsDoc, writeBatch } = await fs();
   const now = Date.now();
-  const docData = { ...data, status: data.status || 'requested', createdAt: now, updatedAt: now };
-  let id: string;
-  if (bookingId) {
-    await setDoc(fsDoc(db, COL.bookings, bookingId), docData);
-    id = bookingId;
-  } else {
-    const ref = await addDoc(collection(db, COL.bookings), docData);
-    id = ref.id;
-  }
-  void pushNotification(data.barberId, {
+  const docData = definedFields({ ...data, status: data.status || 'requested', createdAt: now, updatedAt: now });
+  const ref = bookingId ? fsDoc(db, COL.bookings, bookingId) : fsDoc(collection(db, COL.bookings));
+  const id = ref.id;
+  const batch = writeBatch(db);
+  batch.set(ref, docData);
+  batch.set(fsDoc(collection(db, COL.notifications)), notificationPayload(data.barberId, {
     type: 'booking_request',
     title: 'طلب حجز جديد',
     body: `${data.customerName} حجز ${data.service?.name || 'خدمة'} — ${data.date} الساعة ${data.time}`,
@@ -247,7 +268,8 @@ export async function createBooking(
     fromUid: data.customerUid,
     fromName: data.customerName,
     fromAvatar: data.customerAvatar || '',
-  });
+  }));
+  await batch.commit();
   return id;
 }
 
@@ -294,12 +316,15 @@ export function subscribeBarberLiveLocation(uid: string, cb: (location: LiveBarb
 }
 
 export async function updateBookingStatus(bookingId: string, status: BookingDoc['status']) {
-  const { db, doc, updateDoc, getDoc } = await fs();
+  const { db, doc, collection, runTransaction } = await fs();
+  const { getFirebaseAuthLazy } = await import('./firebase');
+  const actor = (await getFirebaseAuthLazy()).currentUser?.uid;
   const ref = doc(db, COL.bookings, bookingId);
-  await updateDoc(ref, { status, updatedAt: Date.now() });
-  try {
-    const snap = await getDoc(ref);
-    if (snap.exists()) {
+  await runTransaction(db, async transaction => {
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) throw new Error('Booking is unavailable.');
+    if (snap.data().status === status) return;
+    transaction.update(ref, { status, updatedAt: Date.now() });
       const b = snap.data() as BookingDoc;
       const titles: Record<BookingDoc['status'], string> = {
         requested: 'Booking received',
@@ -311,19 +336,19 @@ export async function updateBookingStatus(bookingId: string, status: BookingDoc[
       };
       // A customer cancelling their own request is already viewing the status;
       // don't create a self-notification that Firestore rules correctly reject.
-      if (status !== 'cancelled') {
-        await pushNotification(b.customerUid, {
+      if (actor) {
+        const fromCustomer = actor === b.customerUid;
+        transaction.set(doc(collection(db, COL.notifications)), notificationPayload(fromCustomer ? b.barberId : b.customerUid, {
           type: 'booking_update',
           title: titles[status] || 'Booking update',
           body: `${b.barberName} · ${b.service?.name || ''}`,
           bookingId,
-          fromUid: b.barberId,
-          fromName: b.barberName,
-          fromAvatar: b.barberAvatar || '',
-        });
+          fromUid: actor,
+          fromName: fromCustomer ? b.customerName : b.barberName,
+          fromAvatar: (fromCustomer ? b.customerAvatar : b.barberAvatar) || '',
+        }));
       }
-    }
-  } catch { /* */ }
+  });
 }
 
 export function subscribeCustomerBookings(customerUid: string, cb: (bookings: (BookingDoc & { id: string })[]) => void) {
@@ -374,11 +399,15 @@ export function subscribeBarberBookings(barberId: string, cb: (bookings: (Bookin
   return () => { cancelled = true; if (unsub) unsub(); };
 }
 
-export interface ReviewDoc extends Omit<Review, 'id'> {
+export interface ReviewDoc {
   bookingId: string;
   barberId: string;
   customerUid: string;
   createdAt: number;
+  customerName: string;
+  customerAvatar: string;
+  rating: number;
+  comment: string;
 }
 
 export async function addReview(barberId: string, customerUid: string, bookingId: string, data: Omit<ReviewDoc, 'bookingId' | 'barberId' | 'customerUid' | 'createdAt'>) {
@@ -394,16 +423,18 @@ export async function addReview(barberId: string, customerUid: string, bookingId
 
 export function subscribeBarberReviews(barberId: string, cb: (reviews: (ReviewDoc & { id: string })[]) => void) {
   let unsub: (() => void) | null = null;
-  (async () => {
+  let active = true;
+  void (async () => {
     const { db, collection, onSnapshot, query, where } = await fs();
+    if (!active) return;
     const q = query(collection(db, COL.reviews), where('barberId', '==', barberId));
     unsub = onSnapshot(q, snap => {
       const items = snap.docs.map(d => ({ id: d.id, ...(d.data() as ReviewDoc) }));
       items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      cb(items.slice(0, 30));
-    });
-  })();
-  return () => { if (unsub) unsub(); };
+      if (active) cb(items);
+    }, () => {});
+  })().catch(() => {});
+  return () => { active = false; unsub?.(); };
 }
 
 export interface UserDoc {
@@ -567,14 +598,18 @@ export interface FollowDoc {
 }
 
 export async function followBarber(followerUid: string, barber: { id: string; name?: string; avatar?: string }) {
-  const { db, doc, setDoc } = await fs();
+  const { db, doc, runTransaction } = await fs();
   const id = `${followerUid}__${barber.id}`;
-  await setDoc(doc(db, COL.follows, id), {
+  const ref = doc(db, COL.follows, id);
+  await runTransaction(db, async transaction => {
+    if ((await transaction.get(ref)).exists()) return;
+    transaction.set(ref, {
     followerUid,
     barberId: barber.id,
     barberName: barber.name || '',
     barberAvatar: barber.avatar || '',
     createdAt: Date.now(),
+    });
   });
 }
 
@@ -629,6 +664,10 @@ export interface NotificationDoc {
   createdAt: number;
 }
 
+function notificationPayload(toUid: string, data: Omit<NotificationDoc, 'toUid' | 'read' | 'createdAt'>) {
+  return { toUid, ...data, read: false, createdAt: Date.now(), pushPending: true, nextAttemptAt: 0, pushAttempts: 0 };
+}
+
 export async function pushNotification(
   toUid: string,
   data: Omit<NotificationDoc, 'toUid' | 'read' | 'createdAt'>
@@ -636,15 +675,7 @@ export async function pushNotification(
   if (!toUid) return false;
   try {
     const { db, collection, addDoc } = await fs();
-    await addDoc(collection(db, COL.notifications), {
-      toUid,
-      ...data,
-      read: false,
-      createdAt: Date.now(),
-      pushPending: true,
-      nextAttemptAt: 0,
-      pushAttempts: 0,
-    });
+    await addDoc(collection(db, COL.notifications), notificationPayload(toUid, data));
     return true;
   } catch {
     return false;
@@ -850,7 +881,7 @@ export async function sendBookingMessage(
   text: string,
   imageUrl?: string,
 ): Promise<void> {
-  const { db, collection, addDoc } = await fs();
+  const { db, collection, doc, writeBatch } = await fs();
   const payload: MessageDoc = {
     bookingId,
     fromUid: from.uid,
@@ -862,16 +893,18 @@ export async function sendBookingMessage(
     read: false,
   };
   if (imageUrl) payload.imageUrl = imageUrl;
-  await addDoc(collection(db, `messages/${bookingId}/msgs`), payload);
-  void pushNotification(toUid, {
+  const batch = writeBatch(db);
+  batch.set(doc(collection(db, `messages/${bookingId}/msgs`)), payload);
+  batch.set(doc(collection(db, COL.notifications)), notificationPayload(toUid, {
     type: 'message',
-    title: `ًں’¬ ${from.name}`,
-    body: imageUrl ? (text || 'ًں“· طµظˆط±ط©') : text.slice(0, 100),
+    title: `💬 ${from.name}`,
+    body: imageUrl ? (text || '📷 صورة') : text.slice(0, 100),
     fromUid: from.uid,
     fromName: from.name,
     fromAvatar: from.avatar || '',
     bookingId,
-  });
+  }));
+  await batch.commit();
 }
 
 export function subscribeBookingMessages(

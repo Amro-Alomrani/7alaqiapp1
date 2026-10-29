@@ -1,12 +1,12 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSafeBack } from "@/hooks/useSafeBack";
-import { ArrowLeft, Star, MapPin, Clock, Heart, Share2, Zap, Shield, Timer, Lock, X } from 'lucide-react';
+import { ArrowLeft, Star, MapPin, Clock, Heart, Share2, Zap, Timer, Lock, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useEffect } from 'react';
 import { useBarber } from '@/contexts/DataContext';
 import { subscribeBarberReviews, subscribeStaff, ReviewDoc, type StaffDoc } from '@/lib/db';
 import { Button } from '@/components/ui/button';
-import ReviewCard from '@/components/ReviewCard';
+import { useFollowerCount } from '@/hooks/useFollowerCount';
 import ServiceItem from '@/components/ServiceItem';
 import LiveStatusBadge from '@/components/barber/LiveStatusBadge';
 import { useBarberLiveStatus } from '@/hooks/useBarberLiveStatus';
@@ -23,13 +23,14 @@ export default function BarberDetailPage() {
   const { t, language } = useLanguage();
   const ar = language === 'ar';
   const barber = useBarber(id);
+  const followerCount = useFollowerCount(id);
   const live = useBarberLiveStatus(barber);
   const { customer } = useAuth();
   const [favorited, setFavorited] = useState(() => barber ? favPrefs.getBarbers().has(barber.id) : false);
   const [following, setFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
   const [activeTab, setActiveTab] = useState<'services' | 'reviews'>('services');
-  const [reviews, setReviews] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<(ReviewDoc & { id: string })[]>([]);
   const [avatarImgError, setAvatarImgError] = useState(false);
   const [selectedChair, setSelectedChair] = useState<number | null>(null);
   const [staffList, setStaffList] = useState<(StaffDoc & { id: string })[]>([]);
@@ -67,9 +68,9 @@ export default function BarberDetailPage() {
       } else {
         await followBarber(customer.uid, { id: barber.id, name: barber.name, avatar: barber.avatar });
         setFollowing(true);
-        toast.success(ar ? `تتابع ${barber.name} الآن — ستصلك إشعارات منشوراته 🔔` : `Following ${barber.name} — you'll get post alerts 🔔`);
+        toast.success(ar ? `تتابع ${barber.name} الآن` : `Following ${barber.name}`);
       }
-    } catch (e) {
+    } catch {
       toast.error(ar ? 'فشل الإجراء' : 'Action failed');
     } finally {
       setFollowBusy(false);
@@ -93,7 +94,7 @@ export default function BarberDetailPage() {
     </div>
   );
 
-  const trustColor = barber.trustScore >= 95 ? 'text-green-400' : barber.trustScore >= 85 ? 'text-primary' : 'text-orange-400';
+  const actualRating = reviews.length ? reviews.reduce((total, review) => total + review.rating, 0) / reviews.length : 0;
 
   return (
     <div className="min-h-screen pb-28 overflow-y-auto">
@@ -142,12 +143,12 @@ export default function BarberDetailPage() {
           <div>
             <h1 className="text-xl font-bold text-foreground">{barber.shopName}</h1>
             <p className="text-muted-foreground text-sm">{barber.name}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{(barber.followers || 0).toLocaleString()} {t.barberDetail.followers}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{followerCount === null ? '—' : followerCount.toLocaleString()} {t.barberDetail.followers}</p>
           </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 bg-primary/15 px-2.5 py-1.5 rounded-full">
               <Star size={13} className="text-primary fill-primary" />
-              <span className="font-bold text-primary text-sm">{barber.rating}</span>
+              <span className="font-bold text-primary text-sm">{actualRating.toFixed(1)}</span>
             </div>
             <button
               onClick={toggleFollow}
@@ -175,8 +176,8 @@ export default function BarberDetailPage() {
             <p className="text-xs text-foreground font-semibold">{barber.avgDuration ? `${barber.avgDuration}m` : '—'}</p>
           </div>
           <div className="bg-card border border-border rounded-xl px-2 py-2.5 text-center">
-            <Shield size={13} className={`${trustColor} mx-auto mb-1`} />
-            <p className={`text-xs font-bold ${trustColor}`}>{barber.trustScore || '—'}</p>
+            <Star size={13} className="text-primary mx-auto mb-1" />
+            <p className="text-xs font-bold text-foreground">{reviews.length} {t.home.reviews}</p>
           </div>
         </div>
 
@@ -336,27 +337,6 @@ export default function BarberDetailPage() {
           </div>
         )}
 
-        <div className="bg-card border border-border rounded-2xl p-3 mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-1.5">
-              <Shield size={14} className={trustColor} />
-              <span className="text-sm font-bold text-foreground">{t.barberDetail.trustScore}</span>
-            </div>
-            <span className={`text-sm font-black ${trustColor}`}>{barber.trustScore}/100</span>
-          </div>
-          <div className="h-2 bg-secondary rounded-full overflow-hidden">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${barber.trustScore}%` }}
-              transition={{ duration: 1, ease: 'easeOut', delay: 0.2 }}
-              className={`h-full rounded-full ${barber.trustScore >= 95 ? 'bg-green-400' : barber.trustScore >= 85 ? 'bg-primary' : 'bg-orange-400'}`}
-            />
-          </div>
-          <p className="text-xs text-muted-foreground mt-1.5">
-            {t.barberDetail.trustScoreSubtitle} · {barber.reviewCount} {t.home.reviews}
-          </p>
-        </div>
-
         <p className="text-sm text-muted-foreground mb-3 leading-relaxed">{barber.description}</p>
         <div className="flex gap-2 flex-wrap mb-5">
           {(barber.specialties || []).map(s => (
@@ -379,16 +359,6 @@ export default function BarberDetailPage() {
               <ServiceItem
                 key={s.id}
                 service={s}
-                onView={() => {
-                  import('@/lib/db').then(({ updateBarberProfile }) => {
-                    const updated = (barber.services || []).map(sv =>
-                      sv.id === s.id
-                        ? { ...sv, viewCount: ((sv as any).viewCount || 0) + 1 }
-                        : sv
-                    );
-                    updateBarberProfile(barber.id, { services: updated } as any).catch(() => {});
-                  }).catch(() => {});
-                }}
               />
             ))}
           </div>
@@ -402,7 +372,7 @@ export default function BarberDetailPage() {
                 <div key={r.id} className="bg-card border border-border rounded-2xl p-4">
                   <div className="flex items-start gap-3 mb-2">
                     <div className="flex-1">
-                      <p className="font-bold text-foreground">{r.userName || 'Customer'}</p>
+                      <p className="font-bold text-foreground">{r.customerName || 'Customer'}</p>
                       <div className="flex items-center gap-1 mt-0.5">
                         {Array.from({ length: 5 }).map((_, i) => (
                           <Star key={i} size={12} className={i < r.rating ? 'fill-primary text-primary' : 'text-muted-foreground'} />

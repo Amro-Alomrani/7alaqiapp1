@@ -11,6 +11,7 @@ import { DataProvider } from '@/contexts/DataContext';
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { useSafeBack } from '@/hooks/useSafeBack';
+import { loyaltyEnabled } from '@/lib/features';
 
 const Loader = () => <div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" /></div>;
 
@@ -81,13 +82,15 @@ const BookingChatPage = lazy(() => import('@/pages/BookingChatPage'));
 const HIDE_NAV_PATHS = ['/booking-success', '/booking-status', '/queue', '/home-service', '/notifications', '/favorites', '/history', '/map', '/tracking', '/barbers/', '/salons/', '/chat', '/booking-chat/', '/messages', '/qr-scan'];
 
 function CustomerGuard() {
-  const { isCustomerLoggedIn } = useAuth();
+  const { isCustomerLoggedIn, authReady } = useAuth();
+  if (!authReady) return <Loader />;
   if (!isCustomerLoggedIn) return <Navigate to="/intro" replace />;
   return <Outlet />;
 }
 
 function BarberGuard() {
-  const { isBarberLoggedIn } = useAuth();
+  const { isBarberLoggedIn, authReady } = useAuth();
+  if (!authReady) return <Loader />;
   if (!isBarberLoggedIn) return <Navigate to="/barber/login" replace />;
   return <Outlet />;
 }
@@ -148,7 +151,7 @@ function AppRoutes() {
           <Route path="staff" element={<BarberStaffPage />} />
           <Route path="customer/:bookingId" element={<BarberCustomerMapPage />} />
           <Route path="chat/:bookingId" element={<BookingChatPage />} />
-          <Route path="qr" element={<BarberQRPage />} />
+          <Route path="qr" element={loyaltyEnabled ? <BarberQRPage /> : <Navigate to="/barber/profile" replace />} />
         </Route>
       </Route>
 
@@ -177,7 +180,7 @@ function AppRoutes() {
           <Route path="/favorites" element={<FavoritesPage />} />
           <Route path="/messages" element={<MessagesPage />} />
           <Route path="/booking-chat/:bookingId" element={<BookingChatPage />} />
-          <Route path="/qr-scan" element={<QRScanPage />} />
+          <Route path="/qr-scan" element={loyaltyEnabled ? <QRScanPage /> : <Navigate to="/profile" replace />} />
         </Route>
       </Route>
 

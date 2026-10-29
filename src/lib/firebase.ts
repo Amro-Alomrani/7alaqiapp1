@@ -6,6 +6,18 @@
  * the app renders even if Firebase is misconfigured.
  */
 
+import type { FirebaseApp } from 'firebase/app';
+import type { Auth, User } from 'firebase/auth';
+import type { Messaging } from 'firebase/messaging';
+import type { Firestore } from 'firebase/firestore';
+
+const localQa = import.meta.env.MODE === 'qa';
+function assertLocalQa() {
+  if (localQa && !['127.0.0.1', 'localhost', '[::1]'].includes(window.location.hostname)) {
+    throw new Error('The QA build can only run on localhost.');
+  }
+}
+
 export const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCBRzHkkASsgW-o8WuCca6LsSjtXkNAYiE',
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'halaqyapp.firebaseapp.com',
@@ -16,8 +28,9 @@ export const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:559982533825:android:09d88e5eec3bd11d200840',
 };
 
-let appPromise: Promise<any> | null = null;
-let authPromise: Promise<any> | null = null;
+let appPromise: Promise<FirebaseApp> | null = null;
+let authPromise: Promise<Auth> | null = null;
+let firestorePromise: Promise<Firestore> | null = null;
 
 async function getApp() {
   if (!appPromise) {
@@ -33,8 +46,10 @@ async function getAuthInstance() {
   if (!authPromise) {
     authPromise = (async () => {
       const app = await getApp();
-      const { getAuth } = await import('firebase/auth');
-      return getAuth(app);
+      const { getAuth, connectAuthEmulator } = await import('firebase/auth');
+      const auth = getAuth(app);
+      if (localQa) { assertLocalQa(); connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true }); }
+      return auth;
     })();
   }
   return authPromise;
@@ -86,19 +101,25 @@ export async function sendPasswordReset(email: string) {
   await sendPasswordResetEmail(auth, email);
 }
 
-export async function onAuthChange(cb: (user: any) => void) {
+export async function onAuthChange(cb: (user: User | null) => void) {
   const auth = await getAuthInstance();
   const { onAuthStateChanged } = await import('firebase/auth');
   return onAuthStateChanged(auth, cb);
 }
 
 export async function getFirestoreLazy() {
-  const app = await getApp();
-  const { getFirestore } = await import('firebase/firestore');
-  return getFirestore(app);
+  if (!firestorePromise) firestorePromise = (async () => {
+    const app = await getApp();
+    const { getFirestore, connectFirestoreEmulator } = await import('firebase/firestore');
+    const db = getFirestore(app);
+    if (localQa) { assertLocalQa(); connectFirestoreEmulator(db, '127.0.0.1', 8089); }
+    return db;
+  })();
+  return firestorePromise;
 }
 
 export async function getFunctionsLazy() {
+  if (localQa) throw new Error('Cloud-only actions require testing against the live backend separately.');
   const app = await getApp();
   const { getFunctions } = await import('firebase/functions');
   return getFunctions(app, 'us-central1');
@@ -110,7 +131,7 @@ export async function getRealtimeDbLazy() {
   return getDatabase(app);
 }
 
-let messagingPromise: Promise<any> | null = null;
+let messagingPromise: Promise<Messaging | null> | null = null;
 export async function getMessagingLazy() {
   if (!messagingPromise) {
     messagingPromise = (async () => {
@@ -180,12 +201,8 @@ export async function requestFcmToken() {
 
     // Web FCM needs a VAPID key and a Firebase messaging service worker. Those
     // are intentionally not fabricated from the native Android Firebase config.
-    const messaging = await getMessagingLazy();
-    if (!messaging) return null;
-    const { getToken } = await import('firebase/messaging');
-    const token = await getToken(messaging);
-    return token as string;
-  } catch (e) {
+    return null;
+  } catch {
 return null;
   }
 }

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useMemo } from 'react';
 import type { Barber, Post } from '@/types';
-import { subscribeBarbers, subscribePosts } from '@/lib/db';
+import { subscribeBarbers, subscribePosts, subscribeBarberProfile } from '@/lib/db';
+import { useAuth } from './AuthContext';
 
 interface DataCtx {
   barbers: Barber[];
@@ -67,5 +68,12 @@ export const useBarbers = () => useContext(DataContext).barbers;
 export const usePosts = () => useContext(DataContext).posts;
 export const useBarber = (id: string | undefined) => {
   const { barbers } = useData();
+  const { barberUser } = useAuth();
+  const [ownProfile, setOwnProfile] = useState<Barber | null>(null);
+  useEffect(() => {
+    if (!id || barberUser?.uid !== id) return;
+    return subscribeBarberProfile(id, setOwnProfile);
+  }, [id, barberUser?.uid]);
+  if (id && barberUser?.uid === id && ownProfile?.id === id) return ownProfile;
   return id ? barbers.find(b => b.id === id) : undefined;
 };

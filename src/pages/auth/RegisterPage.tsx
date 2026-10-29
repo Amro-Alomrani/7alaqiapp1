@@ -16,6 +16,7 @@ import { mapAuthError } from '@/lib/authErrors';
 import { processReferralSignup } from '@/lib/db';
 import { getCurrentLocation } from '@/lib/location';
 import MapTileLayer from '@/components/maps/MapTileLayer';
+import { loyaltyEnabled } from '@/lib/features';
 
 const PICKER_ICON = L.divIcon({
   className: '',
@@ -134,7 +135,7 @@ export default function RegisterPage() {
       });
       if (role === 'customer') {
         loginCustomer(user.phone || '', user.name, user.uid);
-        if (referralCode.trim()) {
+        if (loyaltyEnabled && referralCode.trim()) {
           try {
             const referred = await processReferralSignup(referralCode.trim());
             if (referred === 'awarded') {
@@ -334,7 +335,7 @@ export default function RegisterPage() {
           </>
         )}
 
-        {role === 'customer' && (
+        {loyaltyEnabled && role === 'customer' && (
           <div className="bg-card border-2 border-border rounded-2xl px-4 py-3 focus-within:border-primary transition">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 font-semibold">
               {ar ? 'كود الدعوة (اختياري)' : 'Referral code (optional)'}

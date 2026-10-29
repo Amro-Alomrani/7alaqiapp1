@@ -130,8 +130,8 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 
 /* Leaflet in WebView */
 .leaflet-container {
-  width: 100% !important;
-  height: 100% !important;
+  /* Each map owns its height; forcing 100% collapses inline pickers in auto-height forms. */
+  width: 100%;
   background: hsl(var(--background));
   -webkit-tap-highlight-color: transparent;
 }
