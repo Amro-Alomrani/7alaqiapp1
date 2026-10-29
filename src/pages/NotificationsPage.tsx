@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { notificationRoute } from '@/lib/notificationRoute';
 import {
   subscribeNotifications,
   markNotificationRead,
@@ -65,10 +66,7 @@ export default function NotificationsPage() {
   const onTap = async (n: NotificationDoc & { id: string }) => {
     if (!uid) return;
     if (!n.read) await markNotificationRead(n.id).catch(() => {});
-    // The router exposes /booking-status without an ID parameter; the page
-    // resolves the active booking from the signed-in user's live bookings.
-    if (n.bookingId) navigate('/booking-status');
-    else if (n.postId) navigate('/feed');
+    if (n.bookingId || n.postId) navigate(notificationRoute(n, Boolean(barberUser?.uid)));
   };
 
   return (
